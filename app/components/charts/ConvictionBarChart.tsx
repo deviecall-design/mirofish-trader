@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import * as Plottable from "plottable";
-import "plottable/plottable.css";
 
 export interface ConvictionBarDatum {
   symbol: string;
@@ -28,41 +26,49 @@ export function ConvictionBarChart({ data }: { data: ConvictionBarDatum[] }) {
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
 
-    const xScale = new Plottable.Scales.Category();
-    const yScale = new Plottable.Scales.Linear().domain([0, 100]);
+    let chart: { destroy(): void; redraw(): void } | null = null;
+    let handleResize: (() => void) | null = null;
+    let cancelled = false;
 
-    const xAxis = new Plottable.Axes.Category(xScale, "bottom");
-    const yAxis = new Plottable.Axes.Numeric(yScale, "left");
+    import("plottable").then((P) => {
+      if (cancelled || !containerRef.current) return;
 
-    const plot = new Plottable.Plots.Bar<string, number>()
-      .addDataset(new Plottable.Dataset(data))
-      .x((d: ConvictionBarDatum) => d.symbol, xScale)
-      .y((d: ConvictionBarDatum) => d.conviction, yScale)
-      .attr("fill", (d: ConvictionBarDatum) => colorFor(d.direction));
+      const xScale = new P.Scales.Category();
+      const yScale = new P.Scales.Linear().domain([0, 100]);
+      const xAxis = new P.Axes.Category(xScale, "bottom");
+      const yAxis = new P.Axes.Numeric(yScale, "left");
 
-    const chart = new Plottable.Components.Table([
-      [yAxis, plot],
-      [null, xAxis],
-    ]);
+      const plot = new P.Plots.Bar<string, number>()
+        .addDataset(new P.Dataset(data))
+        .x((d: ConvictionBarDatum) => d.symbol, xScale)
+        .y((d: ConvictionBarDatum) => d.conviction, yScale)
+        .attr("fill", (d: ConvictionBarDatum) => colorFor(d.direction));
 
-    chart.renderTo(containerRef.current);
+      chart = new P.Components.Table([
+        [yAxis, plot],
+        [null, xAxis],
+      ]);
 
-    const handleResize = () => chart.redraw();
-    window.addEventListener("resize", handleResize);
+      chart.renderTo(containerRef.current);
+
+      handleResize = () => chart?.redraw();
+      window.addEventListener("resize", handleResize);
+    });
 
     return () => {
-      window.removeEventListener("resize", handleResize);
-      chart.destroy();
+      cancelled = true;
+      if (handleResize) window.removeEventListener("resize", handleResize);
+      chart?.destroy();
     };
   }, [data]);
 
   if (data.length === 0) {
     return (
-      <div className="w-full h-[200px] flex items-center justify-center text-sm text-[var(--muted)]">
-        No conviction data yet.
+      <div className="w-full h-[250px] flex items-center justify-center text-sm text-[var(--muted)]">
+        No signal data yet.
       </div>
     );
   }
 
-  return <div ref={containerRef} className="w-full" style={{ height: 200 }} />;
+  return <div ref={containerRef} className="w-full" style={{ height: 250 }} />;
 }
