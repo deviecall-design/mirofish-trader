@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import * as Plottable from "plottable";
-import "plottable/plottable.css";
 
 export interface SignalTimelineDatum {
   created_at: string;
@@ -36,6 +34,10 @@ export function SignalConvictionTimeline({ data }: { data: SignalTimelineDatum[]
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
 
+    let chart: { destroy(): void; redraw(): void } | null = null;
+    let handleResize: (() => void) | null = null;
+    let cancelled = false;
+
     const parsed: ParsedDatum[] = data.map((d) => ({
       date: new Date(d.created_at),
       symbol: d.symbol,
@@ -43,33 +45,37 @@ export function SignalConvictionTimeline({ data }: { data: SignalTimelineDatum[]
       direction: d.direction,
     }));
 
-    const xScale = new Plottable.Scales.Time();
-    const yScale = new Plottable.Scales.Linear().domain([0, 100]);
+    import("plottable").then((P) => {
+      if (cancelled || !containerRef.current) return;
 
-    const xAxis = new Plottable.Axes.Time(xScale, "bottom");
-    const yAxis = new Plottable.Axes.Numeric(yScale, "left");
+      const xScale = new P.Scales.Time();
+      const yScale = new P.Scales.Linear().domain([0, 100]);
+      const xAxis = new P.Axes.Time(xScale, "bottom");
+      const yAxis = new P.Axes.Numeric(yScale, "left");
 
-    const plot = new Plottable.Plots.Scatter<Date, number>()
-      .addDataset(new Plottable.Dataset(parsed))
-      .x((d: ParsedDatum) => d.date, xScale)
-      .y((d: ParsedDatum) => d.conviction, yScale)
-      .attr("fill", (d: ParsedDatum) => colorFor(d.direction))
-      .attr("opacity", 0.75)
-      .size((d: ParsedDatum) => 4 + (d.conviction / 100) * 16);
+      const plot = new P.Plots.Scatter<Date, number>()
+        .addDataset(new P.Dataset(parsed))
+        .x((d: ParsedDatum) => d.date, xScale)
+        .y((d: ParsedDatum) => d.conviction, yScale)
+        .attr("fill", (d: ParsedDatum) => colorFor(d.direction))
+        .attr("opacity", 0.75)
+        .size((d: ParsedDatum) => 4 + (d.conviction / 100) * 16);
 
-    const chart = new Plottable.Components.Table([
-      [yAxis, plot],
-      [null, xAxis],
-    ]);
+      chart = new P.Components.Table([
+        [yAxis, plot],
+        [null, xAxis],
+      ]);
 
-    chart.renderTo(containerRef.current);
+      chart.renderTo(containerRef.current);
 
-    const handleResize = () => chart.redraw();
-    window.addEventListener("resize", handleResize);
+      handleResize = () => chart?.redraw();
+      window.addEventListener("resize", handleResize);
+    });
 
     return () => {
-      window.removeEventListener("resize", handleResize);
-      chart.destroy();
+      cancelled = true;
+      if (handleResize) window.removeEventListener("resize", handleResize);
+      chart?.destroy();
     };
   }, [data]);
 
