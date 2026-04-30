@@ -1,4 +1,5 @@
 import { Card, Stat } from "../components/Card";
+import { PnLLineChart } from "../components/charts/PnLLineChart";
 import { supabase, TradeRow } from "../lib/supabase";
 import { DrawdownChart } from "./DrawdownChart";
 
@@ -81,6 +82,12 @@ export default async function PerformancePage() {
           }
         />
       </div>
+
+      <Card title="Cumulative P&amp;L over time">
+        <PnLLineChart
+          data={equityCurve.map((p) => ({ date: p.t, pnl: p.cum }))}
+        />
+      </Card>
 
       <Card title="Equity & drawdown">
         {equityCurve.length === 0 ? (

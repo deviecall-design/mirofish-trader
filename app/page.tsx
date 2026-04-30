@@ -1,4 +1,5 @@
 import { Card, Stat } from "./components/Card";
+import { ConvictionBarChart, ConvictionBarDatum } from "./components/charts/ConvictionBarChart";
 import { supabase, SignalRow, TradeRow } from "./lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +15,34 @@ function formatUsd(n: number) {
 
 export default async function Dashboard() {
   const sb = supabase();
-  const [trades, signals] = await Promise.all([
+  const [trades, signals, signalsForChart] = await Promise.all([
     sb.from("trades").select("*").order("opened_at", { ascending: false }),
     sb.from("signals").select("*").order("created_at", { ascending: false }).limit(8),
+    sb.from("signals").select("*").order("created_at", { ascending: false }).limit(200),
   ]);
 
   const tradeRows: TradeRow[] = trades.data ?? [];
   const recentSignals: SignalRow[] = signals.data ?? [];
+  const chartSignals: SignalRow[] = signalsForChart.data ?? [];
+
+  const bySymbol = new Map<string, { sum: number; count: number; dirCounts: Record<string, number> }>();
+  for (const s of chartSignals) {
+    const entry = bySymbol.get(s.symbol) ?? { sum: 0, count: 0, dirCounts: {} };
+    entry.sum += s.conviction;
+    entry.count += 1;
+    entry.dirCounts[s.direction] = (entry.dirCounts[s.direction] ?? 0) + 1;
+    bySymbol.set(s.symbol, entry);
+  }
+  const convictionBarData: ConvictionBarDatum[] = Array.from(bySymbol.entries())
+    .map(([symbol, e]) => {
+      const dominant = Object.entries(e.dirCounts).sort((a, b) => b[1] - a[1])[0][0];
+      return {
+        symbol,
+        conviction: Math.round(e.sum / e.count),
+        direction: dominant,
+      };
+    })
+    .sort((a, b) => b.conviction - a.conviction);
 
   const open = tradeRows.filter((t) => t.status === "open");
   const closed = tradeRows.filter((t) => t.status === "closed");
@@ -53,6 +75,10 @@ export default async function Dashboard() {
         />
         <Stat label="Recent signals" value={String(recentSignals.length)} />
       </div>
+
+      <Card title="Avg conviction by symbol">
+        <ConvictionBarChart data={convictionBarData} />
+      </Card>
 
       <Card title="Open positions">
         {open.length === 0 ? (
