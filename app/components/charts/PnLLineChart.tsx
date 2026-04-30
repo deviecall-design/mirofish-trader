@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import * as Plottable from "plottable";
-import "plottable/plottable.css";
 
 export interface PnLDatum {
   date: string;
@@ -15,53 +13,51 @@ export function PnLLineChart({ data }: { data: PnLDatum[] }) {
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
 
-    const parsed = data.map((d) => ({
-      date: new Date(d.date),
-      pnl: d.pnl,
-    }));
+    let chart: { destroy(): void; redraw(): void } | null = null;
+    let handleResize: (() => void) | null = null;
+    let cancelled = false;
 
-    const positive = parsed.map((d) => ({
-      date: d.date,
-      pnl: d.pnl >= 0 ? d.pnl : 0,
-    }));
-    const negative = parsed.map((d) => ({
-      date: d.date,
-      pnl: d.pnl < 0 ? d.pnl : 0,
-    }));
+    const parsed = data.map((d) => ({ date: new Date(d.date), pnl: d.pnl }));
+    const positive = parsed.map((d) => ({ date: d.date, pnl: d.pnl >= 0 ? d.pnl : 0 }));
+    const negative = parsed.map((d) => ({ date: d.date, pnl: d.pnl < 0 ? d.pnl : 0 }));
 
-    const xScale = new Plottable.Scales.Time();
-    const yScale = new Plottable.Scales.Linear();
+    import("plottable").then((P) => {
+      if (cancelled || !containerRef.current) return;
 
-    const xAxis = new Plottable.Axes.Time(xScale, "bottom");
-    const yAxis = new Plottable.Axes.Numeric(yScale, "left");
+      const xScale = new P.Scales.Time();
+      const yScale = new P.Scales.Linear();
+      const xAxis = new P.Axes.Time(xScale, "bottom");
+      const yAxis = new P.Axes.Numeric(yScale, "left");
 
-    const positiveLine = new Plottable.Plots.Line<Date>()
-      .addDataset(new Plottable.Dataset(positive))
-      .x((d: { date: Date; pnl: number }) => d.date, xScale)
-      .y((d: { date: Date; pnl: number }) => d.pnl, yScale)
-      .attr("stroke", "#3ee0a1");
+      const positiveLine = new P.Plots.Line<Date>()
+        .addDataset(new P.Dataset(positive))
+        .x((d: { date: Date; pnl: number }) => d.date, xScale)
+        .y((d: { date: Date; pnl: number }) => d.pnl, yScale)
+        .attr("stroke", "#3ee0a1");
 
-    const negativeLine = new Plottable.Plots.Line<Date>()
-      .addDataset(new Plottable.Dataset(negative))
-      .x((d: { date: Date; pnl: number }) => d.date, xScale)
-      .y((d: { date: Date; pnl: number }) => d.pnl, yScale)
-      .attr("stroke", "#ff6b6b");
+      const negativeLine = new P.Plots.Line<Date>()
+        .addDataset(new P.Dataset(negative))
+        .x((d: { date: Date; pnl: number }) => d.date, xScale)
+        .y((d: { date: Date; pnl: number }) => d.pnl, yScale)
+        .attr("stroke", "#ff6b6b");
 
-    const plotGroup = new Plottable.Components.Group([positiveLine, negativeLine]);
+      const plotGroup = new P.Components.Group([positiveLine, negativeLine]);
 
-    const chart = new Plottable.Components.Table([
-      [yAxis, plotGroup],
-      [null, xAxis],
-    ]);
+      chart = new P.Components.Table([
+        [yAxis, plotGroup],
+        [null, xAxis],
+      ]);
 
-    chart.renderTo(containerRef.current);
+      chart.renderTo(containerRef.current);
 
-    const handleResize = () => chart.redraw();
-    window.addEventListener("resize", handleResize);
+      handleResize = () => chart?.redraw();
+      window.addEventListener("resize", handleResize);
+    });
 
     return () => {
-      window.removeEventListener("resize", handleResize);
-      chart.destroy();
+      cancelled = true;
+      if (handleResize) window.removeEventListener("resize", handleResize);
+      chart?.destroy();
     };
   }, [data]);
 
