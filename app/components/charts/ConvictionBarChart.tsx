@@ -26,7 +26,8 @@ export function ConvictionBarChart({ data }: { data: ConvictionBarDatum[] }) {
   useEffect(() => {
     if (!containerRef.current || data.length === 0) return;
 
-    let chart: { destroy(): void; redraw(): void } | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let chart: any = null;
     let handleResize: (() => void) | null = null;
     let cancelled = false;
 
