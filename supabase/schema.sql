@@ -87,5 +87,5 @@ insert into public.watchlist (symbol, theme) values
   ('PLTR', 'AI/Tech'),
   ('TSM',  'AI/Tech'),
   ('TSLA', 'Speculative'),
-  ('DRO',  'Speculative')
+  ('DRO.AX',  'Speculative')
 on conflict (owner_id, symbol) do nothing;
