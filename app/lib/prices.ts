@@ -1,33 +1,33 @@
-// Price fetching: CoinGecko for crypto (BTC/ETH), Yahoo Finance v8 quote endpoint for equities.
-// Both endpoints are public and unauthenticated.
+// Price fetching: Binance public API for crypto (BTC/ETH), Yahoo Finance v8 quote endpoint for equities.
+// Both endpoints are public and unauthenticated — no API keys required.
 
-const CRYPTO_IDS: Record<string, string> = {
-  BTC: "bitcoin",
-  ETH: "ethereum",
+const CRYPTO_PAIRS: Record<string, string> = {
+  BTC: "BTCUSDT",
+  ETH: "ETHUSDT",
 };
 
 export interface PriceQuote {
   symbol: string;
   price: number;
-  source: "coingecko" | "yahoo";
+  source: "binance" | "yahoo";
 }
 
 export function isCrypto(symbol: string): boolean {
-  return symbol.toUpperCase() in CRYPTO_IDS;
+  return symbol.toUpperCase() in CRYPTO_PAIRS;
 }
 
 async function fetchCrypto(symbol: string): Promise<PriceQuote | null> {
-  const id = CRYPTO_IDS[symbol.toUpperCase()];
-  if (!id) return null;
+  const pair = CRYPTO_PAIRS[symbol.toUpperCase()];
+  if (!pair) return null;
   const res = await fetch(
-    `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`,
+    `https://api.binance.com/api/v3/ticker/price?symbol=${pair}`,
     { next: { revalidate: 60 } }
   );
   if (!res.ok) return null;
-  const data = (await res.json()) as Record<string, { usd?: number }>;
-  const price = data[id]?.usd;
-  if (typeof price !== "number") return null;
-  return { symbol: symbol.toUpperCase(), price, source: "coingecko" };
+  const data = (await res.json()) as { price?: string };
+  const price = parseFloat(data.price ?? "");
+  if (isNaN(price)) return null;
+  return { symbol: symbol.toUpperCase(), price, source: "binance" };
 }
 
 async function fetchEquity(symbol: string): Promise<PriceQuote | null> {
@@ -49,7 +49,7 @@ async function fetchEquity(symbol: string): Promise<PriceQuote | null> {
     result?.meta?.regularMarketPrice ??
     result?.indicators?.quote?.[0]?.close?.slice(-1)?.[0];
   if (typeof price !== "number") return null;
-  return { symbol: symbol.toUpperCase(), price, source: "yahoo" };
+  return { symbol: symbol.toUpperCase(), price, source: "yahoo" as const };
 }
 
 export async function fetchPrice(symbol: string): Promise<PriceQuote | null> {
