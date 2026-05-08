@@ -44,6 +44,7 @@ export function WatchlistEditor() {
         >
           <option>Crypto</option>
           <option>AI/Tech</option>
+          <option>Strategic Materials</option>
           <option>Speculative</option>
           <option>Other</option>
         </select>
