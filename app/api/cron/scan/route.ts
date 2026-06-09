@@ -4,6 +4,8 @@ import { fetchPrice } from "@/app/lib/prices";
 import { getLastPrice } from "@/app/lib/lastPrices";
 import { runSwarm } from "@/app/lib/mirofish";
 import { sendTelegram } from "@/app/lib/telegram";
+import { getMacroBias } from "@/app/lib/macroBias";
+import { getSocialBias } from "@/app/lib/socialBias";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -120,13 +122,31 @@ async function runScan(): Promise<ScanResult> {
     const move = pctMove(quote.price, previous);
     if (Math.abs(move) < MOVE_THRESHOLD_PCT) continue;
 
+    // Fetch real biases (with error handling)
+    let macroBias = 0;
+    let socialBias = 0;
+
+    try {
+      macroBias = await getMacroBias();
+    } catch (err) {
+      console.error("Failed to fetch macro bias:", err);
+      macroBias = 0;
+    }
+
+    try {
+      socialBias = await getSocialBias(row.symbol);
+    } catch (err) {
+      console.error(`Failed to fetch social bias for ${row.symbol}:`, err);
+      socialBias = 0;
+    }
+
     const swarm = runSwarm({
       symbol: row.symbol,
       price: quote.price,
       pctChange: move,
       recentTrend: move / 5,
-      macroBias: 0,
-      socialBias: 0,
+      macroBias,
+      socialBias,
     });
 
     const { data: inserted } = await sb

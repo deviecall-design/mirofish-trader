@@ -1,8 +1,9 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Card, Stat } from "./components/Card";
 import { ConvictionBarChart, ConvictionBarDatum } from "./components/charts/ConvictionBarChart";
 import { supabase, SignalRow, TradeRow } from "./lib/supabase";
-
-export const dynamic = "force-dynamic";
 
 function formatPct(n: number) {
   const s = n >= 0 ? "+" : "";
@@ -13,17 +14,53 @@ function formatUsd(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-export default async function Dashboard() {
-  const sb = supabase();
-  const [trades, signals, signalsForChart] = await Promise.all([
-    sb.from("trades").select("*").order("opened_at", { ascending: false }),
-    sb.from("signals").select("*").order("created_at", { ascending: false }).limit(8),
-    sb.from("signals").select("*").order("created_at", { ascending: false }).limit(200),
-  ]);
+export default function Dashboard() {
+  const [recentSignals, setRecentSignals] = useState<SignalRow[]>([]);
+  const [tradeRows, setTradeRows] = useState<TradeRow[]>([]);
+  const [chartSignals, setChartSignals] = useState<SignalRow[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const tradeRows: TradeRow[] = trades.data ?? [];
-  const recentSignals: SignalRow[] = signals.data ?? [];
-  const chartSignals: SignalRow[] = signalsForChart.data ?? [];
+  useEffect(() => {
+    const loadInitialData = async () => {
+      const sb = supabase();
+      const [trades, signals, signalsForChartData] = await Promise.all([
+        sb.from("trades").select("*").order("opened_at", { ascending: false }),
+        sb.from("signals").select("*").order("created_at", { ascending: false }).limit(8),
+        sb.from("signals").select("*").order("created_at", { ascending: false }).limit(200),
+      ]);
+
+      setTradeRows((trades.data ?? []) as TradeRow[]);
+      setRecentSignals((signals.data ?? []) as SignalRow[]);
+      setChartSignals((signalsForChartData.data ?? []) as SignalRow[]);
+      setLoading(false);
+
+      // Subscribe to real-time signal updates
+      const channel = supabase()
+        .channel("signals_realtime")
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "signals",
+          },
+          (payload) => {
+            const newSignal = payload.new as SignalRow;
+            // Add to recent signals (keep max 8)
+            setRecentSignals((prev) => [newSignal, ...prev.slice(0, 7)]);
+            // Add to chart signals (keep max 200)
+            setChartSignals((prev) => [newSignal, ...prev.slice(0, 199)]);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        channel.unsubscribe();
+      };
+    };
+
+    loadInitialData().catch(console.error);
+  }, []);
 
   const bySymbol = new Map<string, { sum: number; count: number; dirCounts: Record<string, number> }>();
   for (const s of chartSignals) {
@@ -49,6 +86,17 @@ export default async function Dashboard() {
   const wins = closed.filter((t) => (t.pnl ?? 0) > 0);
   const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
   const totalPnl = closed.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <header>
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <p className="text-sm text-[var(--muted)] mt-1">Loading...</p>
+        </header>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
