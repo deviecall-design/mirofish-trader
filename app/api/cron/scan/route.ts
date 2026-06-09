@@ -6,6 +6,7 @@ import { runSwarm } from "@/app/lib/mirofish";
 import { sendTelegram } from "@/app/lib/telegram";
 import { getMacroBias } from "@/app/lib/macroBias";
 import { getSocialBias } from "@/app/lib/socialBias";
+import { breakdownToPercentages } from "@/app/lib/archetypeUtils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,6 +150,12 @@ async function runScan(): Promise<ScanResult> {
       socialBias,
     });
 
+    // Convert archetype breakdown to percentages
+    const archetypePercentages = breakdownToPercentages(
+      swarm.archetypeBreakdown,
+      swarm.direction
+    );
+
     const { data: inserted } = await sb
       .from("signals")
       .insert({
@@ -158,6 +165,10 @@ async function runScan(): Promise<ScanResult> {
         summary: swarm.summary,
         status: "pending",
         price: quote.price,
+        // Store archetype breakdown as JSON (if supported; otherwise gracefully ignored)
+        meta: JSON.stringify({
+          archetypeBreakdown: archetypePercentages,
+        }),
       })
       .select("*")
       .single();
