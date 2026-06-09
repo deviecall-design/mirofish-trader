@@ -23,6 +23,17 @@ interface DebugMacroResponse {
   timestamp: string;
 }
 
+interface ArchetypeBreakdown {
+  momentum: number;
+  contrarian: number;
+  macro: number;
+  sentiment: number;
+}
+
+interface SignalWithMeta extends SignalRow {
+  archetypeBreakdown?: ArchetypeBreakdown;
+}
+
 function formatPct(n: number) {
   const s = n >= 0 ? "+" : "";
   return `${s}${n.toFixed(2)}%`;
@@ -32,11 +43,26 @@ function formatUsd(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+// Helper to parse meta JSON from signals
+function parseSignalsWithMeta(signalRows: any[]): SignalWithMeta[] {
+  return signalRows.map((s: any) => {
+    try {
+      const meta = s.meta ? JSON.parse(s.meta) : {};
+      return {
+        ...s,
+        archetypeBreakdown: meta.archetypeBreakdown,
+      };
+    } catch {
+      return s as SignalWithMeta;
+    }
+  });
+}
+
 export default function Dashboard() {
   // State: Data
-  const [recentSignals, setRecentSignals] = useState<SignalRow[]>([]);
+  const [recentSignals, setRecentSignals] = useState<SignalWithMeta[]>([]);
   const [tradeRows, setTradeRows] = useState<TradeRow[]>([]);
-  const [chartSignals, setChartSignals] = useState<SignalRow[]>([]);
+  const [chartSignals, setChartSignals] = useState<SignalWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
 
   // State: Bias
@@ -76,8 +102,8 @@ export default function Dashboard() {
       ]);
 
       setTradeRows((trades.data ?? []) as TradeRow[]);
-      setRecentSignals((signals.data ?? []) as SignalRow[]);
-      setChartSignals((signalsForChartData.data ?? []) as SignalRow[]);
+      setRecentSignals(parseSignalsWithMeta(signals.data ?? []));
+      setChartSignals(parseSignalsWithMeta(signalsForChartData.data ?? []));
       setLoading(false);
 
       // Subscribe to real-time signal updates
@@ -91,9 +117,15 @@ export default function Dashboard() {
             table: "signals",
           },
           (payload) => {
-            const newSignal = payload.new as SignalRow;
-            setRecentSignals((prev) => [newSignal, ...prev.slice(0, 7)]);
-            setChartSignals((prev) => [newSignal, ...prev.slice(0, 199)]);
+            const newSignal = payload.new as any;
+            const parsedSignal: SignalWithMeta = {
+              ...newSignal,
+              archetypeBreakdown: newSignal.meta
+                ? JSON.parse(newSignal.meta).archetypeBreakdown
+                : undefined,
+            };
+            setRecentSignals((prev) => [parsedSignal, ...prev.slice(0, 7)]);
+            setChartSignals((prev) => [parsedSignal, ...prev.slice(0, 199)]);
           }
         )
         .subscribe();
@@ -280,7 +312,7 @@ export default function Dashboard() {
               <>
                 {/* Masonry Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {currentPageSignals.map((signal) => (
+                  {currentPageSignals.map((signal: SignalWithMeta) => (
                     <SignalCard
                       key={signal.id}
                       signal={signal}
