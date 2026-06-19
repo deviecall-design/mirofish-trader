@@ -1,28 +1,57 @@
 {
   "name": "mirofish-trader",
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "description": "Multi-Agent AI Trading Swarm — VibeTrade + MiroFish Orchestration",
   "private": true,
+  "workspaces": [
+    "swarm",
+    "adapters",
+    "dashboard",
+    "vibetrade"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "install:all": "npm install && npm install --workspaces",
+    "dev": "npm run dev --workspaces",
+    "dev:swarm": "npm run dev --workspace=swarm",
+    "dev:agent": "npm run dev --workspace=vibetrade/backend",
+    "dev:dashboard": "npm run dev --workspace=dashboard",
+    "build": "npm run build --workspaces",
+    "build:swarm": "npm run build --workspace=swarm",
+    "build:adapters": "npm run build --workspace=adapters",
+    "build:dashboard": "npm run build --workspace=dashboard",
+    "build:vibetrade": "npm run build --workspace=vibetrade",
+    "start": "npm start --workspace=swarm",
+    "start:swarm": "npm start --workspace=swarm",
+    "start:dashboard": "npm start --workspace=dashboard",
+    "test": "npm test --workspaces",
+    "test:swarm": "npm test --workspace=swarm",
+    "test:integration": "npm run test:integration --workspaces",
+    "test:backtest": "npm run test:backtest --workspace=swarm",
+    "test:coverage": "npm test -- --coverage --workspaces",
+    "lint": "npm run lint --workspaces",
+    "format": "npm run format --workspaces",
+    "paper-trading": "npm run start:swarm -- --mode paper-trading",
+    "live-trading": "npm run start:swarm -- --mode live-trading",
+    "backtest": "npm run backtest --workspace=swarm",
+    "backtest:report": "npm run backtest:report --workspace=swarm"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.104.1",
-    "@types/d3": "^7.4.3",
-    "d3": "^7.9.0",
-    "next": "16.2.4",
-    "plottable": "^3.13.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "recharts": "^3.8.1"
+    "@anthropic-ai/sdk": "^0.36.0",
+    "@alpacahq/ts-sdk": "^0.7.0",
+    "dotenv": "^17.3.1",
+    "typescript": "^5.0.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "author": "Deviecall Design",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deviecall-design/mirofish-trader.git"
   }
 }
