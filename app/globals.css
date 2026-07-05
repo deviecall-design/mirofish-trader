@@ -1,17 +1,27 @@
 @import "tailwindcss";
 @import "plottable/plottable.css";
 
+/* Quiet Swarm tokens — see DESIGN.md. The swarm is ambient, the money is solid. */
 :root {
-  --background: #0a0a0b;
-  --foreground: #ededed;
-  --panel: #111114;
-  --panel-2: #1a1a1f;
-  --border: #26262c;
-  --muted: #8a8a93;
-  --accent: #3ee0a1;
-  --bullish: #3ee0a1;
-  --bearish: #ff6b6b;
-  --neutral: #f1c40f;
+  --background: #05070c;
+  --foreground: #e8edf4;
+  --panel: #0a0f18;
+  --panel-2: #101724;
+  --border: #1b2534;
+  --muted: #6b7689;
+  --accent: #55d6f5;
+  --bullish: #2fe6a0;
+  --bearish: #ff5c7a;
+  --neutral: #8a93a6;
+  --armed: #ffb224;
+  --hud: var(--accent);
+  --glow: 0 0 24px -6px rgba(85, 214, 245, 0.4);
+}
+
+/* ARMED mode: live capital remaps the machine's voice to amber, app-wide. */
+[data-mode="live"] {
+  --hud: var(--armed);
+  --glow: 0 0 24px -6px rgba(255, 178, 36, 0.45);
 }
 
 @theme inline {
@@ -25,12 +35,51 @@
   --color-bullish: var(--bullish);
   --color-bearish: var(--bearish);
   --color-neutral: var(--neutral);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-armed: var(--armed);
+  --font-sans: var(--font-instrument);
+  --font-mono: var(--font-jetbrains);
 }
 
-html, body {
+html,
+body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-instrument), sans-serif;
+}
+
+/* HUD labels: Chakra Petch, uppercase, wide tracking. Never below 11px. */
+.hud-label {
+  font-family: var(--font-chakra), sans-serif;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hud-title {
+  font-family: var(--font-chakra), sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Every digit in the product is JetBrains Mono with slashed zeros. */
+.num {
+  font-family: var(--font-jetbrains), monospace;
+  font-feature-settings: "zero";
+}
+
+/* Value-change flash (background only — digits never roll or slide). */
+@keyframes flash-bull { from { background: rgba(47, 230, 160, 0.08); } to { background: transparent; } }
+@keyframes flash-bear { from { background: rgba(255, 92, 122, 0.08); } to { background: transparent; } }
+.flash-bull { animation: flash-bull 300ms ease-out; }
+.flash-bear { animation: flash-bear 300ms ease-out; }
+
+/* Jarvis orb breathing + live-dot pulse — the only perpetual UI motion. */
+@keyframes breathe { 50% { transform: scale(1.06); } }
+@keyframes pulse-dot { 50% { transform: scale(1.4); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-bull, .flash-bear { animation: none; }
 }

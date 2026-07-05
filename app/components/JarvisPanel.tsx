@@ -144,7 +144,7 @@ export default function JarvisPanel() {
       {open && (
         <div className="w-[380px] max-w-[calc(100vw-2.5rem)] rounded-lg border border-[var(--border)] bg-[var(--panel)] shadow-xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
-            <div className="font-semibold text-sm flex items-center gap-2">
+            <div className="hud-title text-sm flex items-center gap-2" style={{ color: "var(--hud)" }}>
               <span aria-hidden>⚡</span> Jarvis
             </div>
             <label className="flex items-center gap-1.5 text-xs text-[var(--muted)] cursor-pointer">
@@ -256,7 +256,15 @@ export default function JarvisPanel() {
       <button
         onClick={() => setOpen((v) => !v)}
         title="Jarvis assistant"
-        className="rounded-full border border-[var(--border)] bg-[var(--panel)] shadow-lg w-12 h-12 text-xl hover:scale-105 transition-transform"
+        className="rounded-full w-[52px] h-[52px] text-lg grid place-items-center"
+        style={{
+          background:
+            "radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--hud) 25%, transparent), transparent 70%), var(--panel)",
+          border: "1px solid color-mix(in srgb, var(--hud) 30%, transparent)",
+          boxShadow: "var(--glow)",
+          color: "var(--hud)",
+          animation: open ? "none" : "breathe 3s ease-in-out infinite",
+        }}
       >
         {open ? "✕" : "⚡"}
       </button>
