@@ -122,7 +122,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </header>
           <main className="flex-1">
-            <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
+            <div className="mx-auto max-w-[1560px] px-5 py-6">{children}</div>
           </main>
         </div>
         <JarvisPanel />
