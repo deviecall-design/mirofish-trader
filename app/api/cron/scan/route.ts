@@ -7,13 +7,15 @@ import { sendTelegram } from "@/app/lib/telegram";
 import { getMacroBias } from "@/app/lib/macroBias";
 import { getSocialBias } from "@/app/lib/socialBias";
 import { breakdownToPercentages } from "@/app/lib/archetypeUtils";
+import { binanceBroker } from "@/app/lib/brokers/binance";
+import {
+  MOVE_THRESHOLD_PCT,
+  TAKE_PROFIT_PCT,
+  STOP_LOSS_PCT,
+} from "@/app/lib/constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const MOVE_THRESHOLD_PCT = 2;
-const TAKE_PROFIT_PCT = 5;
-const STOP_LOSS_PCT = -3;
 
 function checkAuth(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -51,6 +53,72 @@ export async function POST(req: NextRequest) {
   return GET(req);
 }
 
+// Sync a testnet/live trade against its exchange-side OCO exit. Closes the
+// trade with the real fill price when either leg has executed.
+async function syncRealTrade(trade: TradeRow, result: ScanResult) {
+  const sb = supabase();
+  const broker = binanceBroker();
+  if (!broker.isEnabled()) return;
+
+  const { data: ocoOrder } = await sb
+    .from("orders")
+    .select("*")
+    .eq("trade_id", trade.id)
+    .eq("type", "oco")
+    .eq("status", "requested")
+    .maybeSingle();
+  if (!ocoOrder?.broker_order_id) return;
+
+  let status;
+  try {
+    status = await broker.getOcoStatus(trade.symbol, ocoOrder.broker_order_id);
+  } catch (err) {
+    console.error(`OCO sync failed for ${trade.symbol}:`, err);
+    return;
+  }
+  if (!status.done) return;
+
+  const fallback = await fetchPrice(trade.symbol);
+  const exitPrice = status.exitPrice ?? fallback?.price;
+  if (!exitPrice) return;
+
+  const entry = Number(trade.entry_price);
+  const pnl = tradePnl(trade.direction, entry, exitPrice);
+  const reason = pnl >= 0 ? "take-profit" : "stop-loss";
+
+  await sb
+    .from("trades")
+    .update({
+      status: "closed",
+      exit_price: exitPrice,
+      pnl: Number(pnl.toFixed(4)),
+      closed_at: new Date().toISOString(),
+    })
+    .eq("id", trade.id);
+
+  await sb
+    .from("orders")
+    .update({
+      status: "filled",
+      fill_price: exitPrice,
+      filled_at: new Date().toISOString(),
+      raw: status.raw ?? null,
+    })
+    .eq("id", ocoOrder.id);
+
+  result.closedTrades.push({
+    symbol: trade.symbol,
+    pnl: Number(pnl.toFixed(2)),
+    reason: `${reason} (${trade.mode})`,
+  });
+
+  const emoji = pnl >= 0 ? "🟢" : "🔴";
+  await sendTelegram(
+    `${emoji} <b>${trade.symbol}</b> closed on exchange (${reason}) ` +
+      `at $${exitPrice.toFixed(2)} — P&amp;L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}% [${trade.mode}]`
+  );
+}
+
 async function runScan(): Promise<ScanResult> {
   const sb = supabase();
   const result: ScanResult = { scanned: [], newSignals: [], closedTrades: [] };
@@ -62,6 +130,13 @@ async function runScan(): Promise<ScanResult> {
     .eq("status", "open");
 
   for (const trade of (openTrades ?? []) as TradeRow[]) {
+    // Real trades exit via the exchange-side OCO — sync its status instead
+    // of simulating TP/SL.
+    if (trade.mode && trade.mode !== "paper") {
+      await syncRealTrade(trade, result);
+      continue;
+    }
+
     const quote = await fetchPrice(trade.symbol);
     if (!quote) continue;
     const entry = Number(trade.entry_price);
