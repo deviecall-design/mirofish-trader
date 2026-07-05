@@ -54,7 +54,16 @@ export async function approveSignal(signalId: string) {
     })
     .select("id")
     .single();
-  if (insErr) throw new Error(insErr.message);
+  if (insErr) {
+    // Don't strand the signal as approved with no trade — revert so it can
+    // be re-approved once the underlying problem (e.g. missing migration)
+    // is fixed.
+    await sb.from("signals").update({ status: "pending" }).eq("id", signalId);
+    await sendTelegram(
+      `⚠️ <b>${signal.symbol}</b> trade insert failed, signal reverted to pending: ${insErr.message}`
+    );
+    throw new Error(insErr.message);
+  }
 
   if (execution.executed && trade) {
     // Audit trail: one row for the market entry, one for the OCO exit.
