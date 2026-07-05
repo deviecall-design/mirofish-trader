@@ -41,7 +41,7 @@ export async function approveSignal(signalId: string) {
     .eq("id", signalId);
   if (updErr) throw new Error(updErr.message);
 
-  const { data: trade, error: insErr } = await sb
+  let { data: trade, error: insErr } = await sb
     .from("trades")
     .insert({
       symbol: signal.symbol,
@@ -54,6 +54,23 @@ export async function approveSignal(signalId: string) {
     })
     .select("id")
     .single();
+  if (insErr && !execution.executed && /mode/.test(insErr.message)) {
+    // Pre-migration database (no trades.mode column yet): paper trades can
+    // still proceed without the mode tag. Real executions never take this
+    // path — they require the migrated schema for the orders audit trail.
+    ({ data: trade, error: insErr } = await sb
+      .from("trades")
+      .insert({
+        symbol: signal.symbol,
+        direction: signal.direction,
+        entry_price: execution.entryPrice,
+        quantity: execution.qty,
+        status: "open",
+        signal_id: signalId,
+      })
+      .select("id")
+      .single());
+  }
   if (insErr) {
     // Don't strand the signal as approved with no trade — revert so it can
     // be re-approved once the underlying problem (e.g. missing migration)
