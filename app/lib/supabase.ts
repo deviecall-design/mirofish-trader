@@ -23,6 +23,7 @@ export function supabase(): SupabaseClient {
 export type Direction = "bullish" | "bearish" | "neutral";
 export type SignalStatus = "pending" | "approved" | "ignored";
 export type TradeStatus = "open" | "closed";
+export type TradeMode = "paper" | "testnet" | "live";
 
 export interface WatchlistRow {
   id: string;
@@ -55,4 +56,21 @@ export interface TradeRow {
   opened_at: string;
   closed_at: string | null;
   signal_id: string | null;
+  mode: TradeMode;
+}
+
+export interface OrderRow {
+  id: string;
+  trade_id: string | null;
+  symbol: string;
+  side: "BUY" | "SELL";
+  type: "market" | "oco";
+  qty: number | null;
+  status: "requested" | "filled" | "cancelled" | "rejected";
+  broker: string;
+  broker_order_id: string | null;
+  fill_price: number | null;
+  raw: unknown;
+  requested_at: string;
+  filled_at: string | null;
 }
