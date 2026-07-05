@@ -39,7 +39,7 @@ export function Stat({
       ? "text-[var(--neutral)]"
       : "";
   return (
-    <Card>
+    <Card className="hud-corners">
       <div className="hud-label">{label}</div>
       <div className={`num mt-1 text-[28px] font-medium ${color}`}>{value}</div>
       {hint && <div className="num mt-1 text-xs text-[var(--muted)]">{hint}</div>}

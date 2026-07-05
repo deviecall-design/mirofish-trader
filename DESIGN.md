@@ -23,18 +23,18 @@
 - **Approach:** Restrained. Cyan is the only voice of the machine; green/red speak only for money; amber speaks only for live capital.
 
 ```css
---background: #05070C;  /* page — the void */
---panel:      #0A0F18;  /* cards, chat, tables */
---panel-2:    #101724;  /* nested: inputs, tooltips, hover rows */
---foreground: #E8EDF4;  /* never pure white */
---muted:      #6B7689;
---accent:     #55D6F5;  /* HUD cyan — the swarm's/Jarvis's color */
+--background: #060504;  /* page — warm void (arc-reactor revision) */
+--panel:      #120D07;  /* cards, chat, tables */
+--panel-2:    #1B140B;  /* nested: inputs, tooltips, hover rows */
+--foreground: #F2EDE4;  /* warm off-white, never pure white */
+--muted:      #8D8272;
+--accent:     #FFAE33;  /* arc-reactor amber — the swarm's/Jarvis's color */
 --bullish:    #2FE6A0;
 --bearish:    #FF5C7A;
 --neutral:    #8A93A6;
---armed:      #FFB224;  /* live capital ONLY */
---border:     #1B2534;
---glow:       0 0 24px -6px rgba(85,214,245,.4);
+--armed:      #FF4D4D;  /* live capital runs HOT red */
+--border:     #33241374;
+--glow:       0 0 24px -6px rgba(255,174,51,.45);
 ```
 
 - **Glow discipline:** glow is a status indicator, not decoration. Only three things may glow: the live price dot, the Jarvis orb, the ARMED banner.
@@ -71,3 +71,4 @@
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-07-05 | Quiet Swarm system created | /design-consultation: research (TradingView/Linear) + outside-voice synthesis; owner approved cinematic-legible HUD, swarm-as-hero, ARMED mode |
+| 2026-07-05 | Arc-reactor revision | Owner supplied Iron-Man reference video: HUD accent cyan→amber (#FFAE33) on warm blacks, ARMED remaps to hot red (#FF4D4D), mission-control status modules added to header, arc-reactor Jarvis orb, HUD corner brackets on stat cards |

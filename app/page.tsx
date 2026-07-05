@@ -105,37 +105,40 @@ export default function Dashboard() {
       setRecentSignals(parseSignalsWithMeta(signals.data ?? []));
       setChartSignals(parseSignalsWithMeta(signalsForChartData.data ?? []));
       setLoading(false);
-
-      // Subscribe to real-time signal updates
-      const channel = supabase()
-        .channel("signals_realtime")
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "signals",
-          },
-          (payload) => {
-            const newSignal = payload.new as any;
-            const parsedSignal: SignalWithMeta = {
-              ...newSignal,
-              archetypeBreakdown: newSignal.meta
-                ? JSON.parse(newSignal.meta).archetypeBreakdown
-                : undefined,
-            };
-            setRecentSignals((prev) => [parsedSignal, ...prev.slice(0, 7)]);
-            setChartSignals((prev) => [parsedSignal, ...prev.slice(0, 199)]);
-          }
-        )
-        .subscribe();
-
-      return () => {
-        channel.unsubscribe();
-      };
     };
 
     loadInitialData().catch(console.error);
+  }, []);
+
+  // Subscribe to real-time signal updates
+  useEffect(() => {
+    const sb = supabase();
+    const channel = sb
+      .channel("signals_realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "signals",
+        },
+        (payload) => {
+          const newSignal = payload.new as any;
+          const parsedSignal: SignalWithMeta = {
+            ...newSignal,
+            archetypeBreakdown: newSignal.meta
+              ? JSON.parse(newSignal.meta).archetypeBreakdown
+              : undefined,
+          };
+          setRecentSignals((prev) => [parsedSignal, ...prev.slice(0, 7)]);
+          setChartSignals((prev) => [parsedSignal, ...prev.slice(0, 199)]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
   }, []);
 
   // Fetch macro/social bias periodically

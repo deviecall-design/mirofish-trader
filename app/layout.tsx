@@ -34,6 +34,28 @@ const NAV = [
   { href: "/watchlist",   label: "Watchlist" },
 ];
 
+function StatusModule({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "ok" | "hot" | "off";
+}) {
+  const dot = tone === "ok" ? "var(--bullish)" : tone === "hot" ? "var(--armed)" : "var(--muted)";
+  return (
+    <span className="hud-label flex items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2.5 py-1">
+      <span
+        aria-hidden
+        className="inline-block w-1.5 h-1.5 rounded-full"
+        style={{ background: dot, boxShadow: tone !== "off" ? `0 0 6px ${dot}` : "none" }}
+      />
+      {label} <span className="text-[var(--foreground)]">{value}</span>
+    </span>
+  );
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const mode = executionMode();
   return (
@@ -80,6 +102,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     </Link>
                   ))}
                 </nav>
+              </div>
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <StatusModule label="Swarm" value="1000 agents" tone="ok" />
+                <StatusModule
+                  label="Execution"
+                  value={mode === "live" ? "armed" : mode}
+                  tone={mode === "live" ? "hot" : mode === "testnet" ? "ok" : "off"}
+                />
+                <StatusModule
+                  label="Jarvis"
+                  value={process.env.ANTHROPIC_API_KEY ? "active" : "offline"}
+                  tone={process.env.ANTHROPIC_API_KEY ? "ok" : "off"}
+                />
               </div>
               <div className="mt-2">
                 <AgentWire />

@@ -48,7 +48,7 @@ export default function SwarmField({
     }));
 
     const hudColor = () =>
-      getComputedStyle(document.body).getPropertyValue("--hud").trim() || "#55D6F5";
+      getComputedStyle(document.body).getPropertyValue("--hud").trim() || "#FFAE33";
 
     let raf = 0;
     let last = 0;

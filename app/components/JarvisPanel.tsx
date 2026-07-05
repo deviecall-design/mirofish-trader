@@ -256,16 +256,30 @@ export default function JarvisPanel() {
       <button
         onClick={() => setOpen((v) => !v)}
         title="Jarvis assistant"
-        className="rounded-full w-[52px] h-[52px] text-lg grid place-items-center"
+        className="relative rounded-full w-[56px] h-[56px] text-lg grid place-items-center"
         style={{
           background:
-            "radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--hud) 25%, transparent), transparent 70%), var(--panel)",
-          border: "1px solid color-mix(in srgb, var(--hud) 30%, transparent)",
+            "radial-gradient(circle, color-mix(in srgb, var(--hud) 55%, white 10%) 0%, color-mix(in srgb, var(--hud) 30%, transparent) 28%, transparent 62%), var(--panel)",
+          border: "1px solid color-mix(in srgb, var(--hud) 40%, transparent)",
           boxShadow: "var(--glow)",
           color: "var(--hud)",
           animation: open ? "none" : "breathe 3s ease-in-out infinite",
         }}
       >
+        {/* arc-reactor ring */}
+        <span
+          aria-hidden
+          className="absolute inset-[5px] rounded-full pointer-events-none"
+          style={{
+            border: "1px dashed color-mix(in srgb, var(--hud) 60%, transparent)",
+            animation: "reactor-spin 14s linear infinite",
+          }}
+        />
+        <span
+          aria-hidden
+          className="absolute inset-[11px] rounded-full pointer-events-none"
+          style={{ border: "1px solid color-mix(in srgb, var(--hud) 35%, transparent)" }}
+        />
         {open ? "✕" : "⚡"}
       </button>
     </div>
