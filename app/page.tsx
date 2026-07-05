@@ -1,20 +1,15 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
-import { BiasIndicator } from "./components/BiasIndicator";
-import { MacroSentimentSparklines } from "./components/MacroSentimentSparklines";
-import { ArchetypeFilter, Archetype } from "./components/ArchetypeFilter";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { SignalCard } from "./components/SignalCard";
+import ConsensusStrip from "./components/ConsensusStrip";
 import { ConvictionHeatmap } from "./components/ConvictionHeatmap";
 import { Card, Stat } from "./components/Card";
 import { ConvictionBarChart, ConvictionBarDatum } from "./components/charts/ConvictionBarChart";
 import { supabase, SignalRow, TradeRow } from "./lib/supabase";
 import { useVirtualizedSignals } from "./hooks/useVirtualizedSignals";
-
-interface SparklineData {
-  time: string;
-  value: number;
-}
+import { Archetype } from "./components/ArchetypeFilter";
+import { SignalActions } from "./signals/SignalActions";
 
 interface DebugMacroResponse {
   degraded: boolean;
@@ -34,6 +29,8 @@ interface SignalWithMeta extends SignalRow {
   archetypeBreakdown?: ArchetypeBreakdown;
 }
 
+const ARCHETYPES: Archetype[] = ["momentum", "contrarian", "macro", "sentiment"];
+
 function formatPct(n: number) {
   const s = n >= 0 ? "+" : "";
   return `${s}${n.toFixed(2)}%`;
@@ -43,47 +40,42 @@ function formatUsd(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-// Helper to parse meta JSON from signals
 function parseSignalsWithMeta(signalRows: any[]): SignalWithMeta[] {
   return signalRows.map((s: any) => {
     try {
       const meta = s.meta ? JSON.parse(s.meta) : {};
-      return {
-        ...s,
-        archetypeBreakdown: meta.archetypeBreakdown,
-      };
+      return { ...s, archetypeBreakdown: meta.archetypeBreakdown };
     } catch {
       return s as SignalWithMeta;
     }
   });
 }
 
+function BiasChip({ label, value }: { label: string; value: number }) {
+  const tone =
+    value > 0.05 ? "var(--bullish)" : value < -0.05 ? "var(--bearish)" : "var(--muted)";
+  return (
+    <span className="hud-label flex items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2.5 py-1">
+      {label}
+      <span className="num" style={{ color: tone }}>
+        {value >= 0 ? "+" : ""}
+        {Math.round(value * 100)}%
+      </span>
+    </span>
+  );
+}
+
 export default function Dashboard() {
-  // State: Data
   const [recentSignals, setRecentSignals] = useState<SignalWithMeta[]>([]);
   const [tradeRows, setTradeRows] = useState<TradeRow[]>([]);
   const [chartSignals, setChartSignals] = useState<SignalWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // State: Bias
   const [macroBias, setMacroBias] = useState<number>(0);
   const [socialBias, setSocialBias] = useState<number>(0);
-  const [biasLoading, setBiasLoading] = useState(false);
-
-  // State: Sparklines
-  const [t10y2yHistory, setT10y2yHistory] = useState<SparklineData[]>([]);
-  const [vixHistory, setVixHistory] = useState<SparklineData[]>([]);
-  const [sentimentHistory, setSentimentHistory] = useState<SparklineData[]>([]);
-
-  // State: UI
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedArchetypes, setSelectedArchetypes] = useState<Set<Archetype>>(
-    new Set()
-  );
+  const [selectedArchetypes, setSelectedArchetypes] = useState<Set<Archetype>>(new Set());
   const [currentPage, setCurrentPage] = useState(0);
   const PAGE_SIZE = 20;
 
-  // Hooks
   const { filtered: filteredSignals, pages } = useVirtualizedSignals(
     recentSignals,
     selectedArchetypes,
@@ -100,13 +92,11 @@ export default function Dashboard() {
         sb.from("signals").select("*").order("created_at", { ascending: false }).limit(8),
         sb.from("signals").select("*").order("created_at", { ascending: false }).limit(200),
       ]);
-
       setTradeRows((trades.data ?? []) as TradeRow[]);
       setRecentSignals(parseSignalsWithMeta(signals.data ?? []));
       setChartSignals(parseSignalsWithMeta(signalsForChartData.data ?? []));
       setLoading(false);
     };
-
     loadInitialData().catch(console.error);
   }, []);
 
@@ -117,11 +107,7 @@ export default function Dashboard() {
       .channel("signals_realtime")
       .on(
         "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "signals",
-        },
+        { event: "INSERT", schema: "public", table: "signals" },
         (payload) => {
           const newSignal = payload.new as any;
           const parsedSignal: SignalWithMeta = {
@@ -135,271 +121,338 @@ export default function Dashboard() {
         }
       )
       .subscribe();
-
     return () => {
       sb.removeChannel(channel);
     };
   }, []);
 
-  // Fetch macro/social bias periodically
+  // Macro/social bias, refreshed each minute
   useEffect(() => {
     const fetchBias = async () => {
-      setBiasLoading(true);
       try {
         const res = await fetch("/api/debug/macro");
         const data: DebugMacroResponse = await res.json();
         setMacroBias(data.macro_bias);
         setSocialBias(data.social_bias);
-
-        // Add to sparkline history (simplified: just add one data point)
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-
-        setT10y2yHistory((prev) => [
-          ...prev.slice(-23), // Keep last 24h
-          { time: timeStr, value: data.macro_bias },
-        ]);
-        setVixHistory((prev) => [
-          ...prev.slice(-23),
-          { time: timeStr, value: data.social_bias * 0.5 }, // Mock VIX (not real)
-        ]);
-        setSentimentHistory((prev) => [
-          ...prev.slice(-23),
-          { time: timeStr, value: data.social_bias },
-        ]);
       } catch (err) {
         console.error("Failed to fetch bias:", err);
-      } finally {
-        setBiasLoading(false);
       }
     };
-
     fetchBias();
-    const interval = setInterval(fetchBias, 60000); // Update every minute
+    const interval = setInterval(fetchBias, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Handle archetype filter toggle
   const handleArchetypeToggle = useCallback((archetype: Archetype) => {
     setSelectedArchetypes((prev) => {
       const next = new Set(prev);
-      if (next.has(archetype)) {
-        next.delete(archetype);
-      } else {
-        next.add(archetype);
-      }
-      // TODO: Persist to URL query params / localStorage
+      if (next.has(archetype)) next.delete(archetype);
+      else next.add(archetype);
       return next;
     });
-    setCurrentPage(0); // Reset to first page when filter changes
+    setCurrentPage(0);
   }, []);
 
-  // Calculate chart data
-  const bySymbol = new Map<string, { sum: number; count: number; dirCounts: Record<string, number> }>();
-  for (const s of chartSignals) {
-    const entry = bySymbol.get(s.symbol) ?? { sum: 0, count: 0, dirCounts: {} };
-    entry.sum += s.conviction;
-    entry.count += 1;
-    entry.dirCounts[s.direction] = (entry.dirCounts[s.direction] ?? 0) + 1;
-    bySymbol.set(s.symbol, entry);
-  }
-  const convictionBarData: ConvictionBarDatum[] = Array.from(bySymbol.entries())
-    .map(([symbol, e]) => {
-      const dominant = Object.entries(e.dirCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "neutral";
-      return {
+  // Chart data
+  const convictionBarData: ConvictionBarDatum[] = useMemo(() => {
+    const bySymbol = new Map<string, { sum: number; count: number; dirCounts: Record<string, number> }>();
+    for (const s of chartSignals) {
+      const entry = bySymbol.get(s.symbol) ?? { sum: 0, count: 0, dirCounts: {} };
+      entry.sum += s.conviction;
+      entry.count += 1;
+      entry.dirCounts[s.direction] = (entry.dirCounts[s.direction] ?? 0) + 1;
+      bySymbol.set(s.symbol, entry);
+    }
+    return Array.from(bySymbol.entries())
+      .map(([symbol, e]) => ({
         symbol,
         conviction: Math.round(e.sum / e.count),
-        direction: dominant,
-      };
-    })
-    .sort((a, b) => b.conviction - a.conviction);
+        direction:
+          Object.entries(e.dirCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "neutral",
+      }))
+      .sort((a, b) => b.conviction - a.conviction);
+  }, [chartSignals]);
 
-  // Calculate trade stats
+  // Trade stats
   const open = tradeRows.filter((t) => t.status === "open");
   const closed = tradeRows.filter((t) => t.status === "closed");
   const wins = closed.filter((t) => (t.pnl ?? 0) > 0);
   const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
   const totalPnl = closed.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
 
-  const highConvictionCount = recentSignals.filter((s) => s.conviction >= 67).length;
-  const pendingCount = recentSignals.filter((s) => s.status === "pending").length;
+  // Swarm hero: the highest-conviction pending signal is the machine's ask.
+  const topSignal = useMemo(
+    () =>
+      [...recentSignals]
+        .filter((s) => s.status === "pending")
+        .sort((a, b) => b.conviction - a.conviction)[0],
+    [recentSignals]
+  );
+  const consensusShare = topSignal
+    ? Math.round((0.33 + 0.67 * (topSignal.conviction / 100)) * 100)
+    : null;
 
   if (loading) {
     return (
-      <div className="space-y-8 p-6">
-        <header>
-          <h1 className="text-2xl font-semibold text-white">Dashboard</h1>
-          <p className="text-sm text-[#64748B] mt-1">Loading...</p>
-        </header>
+      <div className="py-24 text-center">
+        <p className="hud-label animate-pulse">Bringing swarm online…</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#0F172A] min-h-screen">
-      {/* Sticky Hero Section */}
-      <BiasIndicator
-        macroBias={macroBias}
-        socialBias={socialBias}
-        loading={biasLoading}
-      />
+    <div className="space-y-8">
+      {/* ── Swarm hero: state of the machine, not state of the market ── */}
+      <section className="grid gap-4 lg:grid-cols-[1fr_1.2fr]">
+        <Card className="hud-corners flex flex-col justify-between gap-6">
+          <div>
+            <div className="hud-label">Swarm Consensus</div>
+            <div className="mt-2 flex items-baseline gap-3">
+              <span className="num text-5xl font-bold" style={{ color: "var(--hud)" }}>
+                {consensusShare ?? "—"}
+                {consensusShare !== null && (
+                  <span className="text-2xl text-[var(--muted)]">%</span>
+                )}
+              </span>
+              {topSignal && (
+                <span className="num text-sm text-[var(--muted)]">
+                  on {topSignal.symbol} · {topSignal.direction}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {topSignal
+                ? `${Math.round((consensusShare! / 100) * 1000)} of 1,000 agents aligned on the top signal`
+                : "1,000 agents watching — no pending signals"}
+            </p>
+          </div>
+          <div className="flex items-end justify-between gap-4 flex-wrap">
+            <div>
+              <div className="hud-label">Total P&amp;L</div>
+              <div
+                className={`num text-4xl font-bold ${
+                  totalPnl >= 0 ? "text-[var(--bullish)]" : "text-[var(--bearish)]"
+                }`}
+              >
+                {formatPct(totalPnl)}
+              </div>
+              <div className="num mt-1 text-xs text-[var(--muted)]">
+                {closed.length} closed · {open.length} open
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <BiasChip label="Macro" value={macroBias} />
+              <BiasChip label="Social" value={socialBias} />
+            </div>
+          </div>
+        </Card>
 
-      {/* Sparklines */}
-      <div className="sticky top-[80px] z-30 bg-[#0F172A] px-6 py-4 border-b border-[#334155]/50">
-        <div className="max-w-7xl mx-auto">
-          <MacroSentimentSparklines
-            t10y2yHistory={t10y2yHistory}
-            vixHistory={vixHistory}
-            sentimentHistory={sentimentHistory}
-            height={40}
-          />
-        </div>
+        <Card className="hud-corners" title="Top conviction signal">
+          {topSignal ? (
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <div className="flex items-baseline gap-3">
+                  <span className="num text-2xl font-bold">{topSignal.symbol}</span>
+                  <span
+                    className="hud-label rounded border px-2 py-0.5"
+                    style={{
+                      color:
+                        topSignal.direction === "bullish"
+                          ? "var(--bullish)"
+                          : topSignal.direction === "bearish"
+                          ? "var(--bearish)"
+                          : "var(--neutral)",
+                      borderColor: "color-mix(in srgb, currentColor 35%, transparent)",
+                    }}
+                  >
+                    {topSignal.direction}
+                  </span>
+                </div>
+                <span className="num text-2xl font-bold">
+                  {topSignal.conviction}
+                  <span className="text-sm text-[var(--muted)]">/100</span>
+                </span>
+              </div>
+              <ConsensusStrip
+                direction={topSignal.direction}
+                conviction={topSignal.conviction}
+              />
+              {topSignal.summary && (
+                <p className="text-sm text-[var(--muted)] leading-relaxed">
+                  {topSignal.summary}
+                </p>
+              )}
+              <div className="flex items-center justify-between gap-3 pt-1">
+                {topSignal.price != null && (
+                  <span className="num text-sm text-[var(--muted)]">
+                    ${Number(topSignal.price).toFixed(2)}
+                  </span>
+                )}
+                <SignalActions signal={topSignal} />
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--muted)]">
+              Nothing awaiting approval. The swarm scans every 15 minutes and will
+              raise a signal on the next ±2% move.
+            </p>
+          )}
+        </Card>
+      </section>
+
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Stat
+          label="Win rate"
+          value={`${winRate.toFixed(0)}%`}
+          hint={`${wins.length}/${closed.length} wins`}
+          tone={winRate >= 50 ? "bullish" : closed.length ? "bearish" : undefined}
+        />
+        <Stat label="Open positions" value={String(open.length)} />
+        <Stat
+          label="High conviction"
+          value={String(recentSignals.filter((s) => s.conviction >= 67).length)}
+        />
+        <Stat
+          label="Pending approval"
+          value={String(recentSignals.filter((s) => s.status === "pending").length)}
+          tone="neutral"
+        />
       </div>
 
-      {/* Main Layout: Sidebar + Feed */}
-      <div className="flex">
-        {/* Sidebar */}
-        <ArchetypeFilter
-          selectedArchetypes={selectedArchetypes}
-          onToggle={handleArchetypeToggle}
-          signalStats={{
-            total: recentSignals.length,
-            highConviction: highConvictionCount,
-            pending: pendingCount,
-          }}
-          isOpen={sidebarOpen}
-          onToggleOpen={() => setSidebarOpen(!sidebarOpen)}
-        />
+      {/* ── Conviction chart ── */}
+      <Card title="Avg conviction by symbol">
+        <ConvictionBarChart data={convictionBarData} />
+      </Card>
 
-        {/* Main Content Area */}
-        <main className="flex-1 px-6 py-8 max-w-7xl mx-auto w-full space-y-8">
-          {/* Stats Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Stat
-              label="Total P&amp;L"
-              value={formatPct(totalPnl)}
-              hint={`${closed.length} closed trades`}
-              tone={totalPnl >= 0 ? "bullish" : "bearish"}
-            />
-            <Stat label="Open positions" value={String(open.length)} />
-            <Stat
-              label="Win rate"
-              value={`${winRate.toFixed(0)}%`}
-              hint={`${wins.length}/${closed.length} wins`}
-              tone={winRate >= 50 ? "bullish" : closed.length ? "bearish" : undefined}
-            />
-            <Stat label="Total signals" value={String(recentSignals.length)} />
+      {/* ── Signal feed ── */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h2 className="hud-title text-lg">
+            <span style={{ color: "var(--hud)" }}>//</span> Signals ({filteredSignals.length})
+          </h2>
+          <div className="flex gap-2">
+            {ARCHETYPES.map((a) => {
+              const active = selectedArchetypes.has(a);
+              return (
+                <button
+                  key={a}
+                  onClick={() => handleArchetypeToggle(a)}
+                  className="hud-label rounded border px-2.5 py-1 transition-colors duration-120"
+                  style={{
+                    borderColor: active
+                      ? "color-mix(in srgb, var(--hud) 50%, transparent)"
+                      : "var(--border)",
+                    color: active ? "var(--hud)" : "var(--muted)",
+                    background: active ? "var(--panel-2)" : "transparent",
+                  }}
+                >
+                  {a}
+                </button>
+              );
+            })}
           </div>
+        </div>
 
-          {/* Conviction Chart */}
-          <Card title="Avg conviction by symbol">
-            <ConvictionBarChart data={convictionBarData} />
+        {filteredSignals.length === 0 ? (
+          <Card>
+            <p className="text-sm text-[var(--muted)]">
+              No signals yet — the cron job will populate this when prices move ±2%.
+            </p>
           </Card>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {currentPageSignals.map((signal: SignalWithMeta) => (
+                <SignalCard key={signal.id} signal={signal} compact={false} />
+              ))}
+            </div>
 
-          {/* Signal Feed */}
-          <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">
-              Signals ({filteredSignals.length})
-            </h2>
-
-            {filteredSignals.length === 0 ? (
-              <Card title="Signals">
-                <p className="text-sm text-[#64748B]">
-                  No signals yet — the cron job will populate this when prices move ±2%.
-                </p>
-              </Card>
-            ) : (
-              <>
-                {/* Masonry Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {currentPageSignals.map((signal: SignalWithMeta) => (
-                    <SignalCard
-                      key={signal.id}
-                      signal={signal}
-                      compact={false}
-                    />
-                  ))}
-                </div>
-
-                {/* Pagination */}
-                {pages.length > 1 && (
-                  <div className="flex items-center justify-center gap-2 pt-4">
-                    <button
-                      onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
-                      disabled={currentPage === 0}
-                      className="px-4 py-2 rounded-lg bg-[#1E293B]/50 border border-[#334155]/50 text-[#CBD5E1] hover:bg-[#334155]/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      ← Previous
-                    </button>
-
-                    <div className="flex gap-1">
-                      {pages.map((_, i) => (
-                        <button
-                          key={i}
-                          onClick={() => setCurrentPage(i)}
-                          className={`w-8 h-8 rounded-lg font-semibold transition-colors ${
-                            currentPage === i
-                              ? "bg-[#3B82F6] text-white"
-                              : "bg-[#1E293B]/50 border border-[#334155]/50 text-[#CBD5E1] hover:bg-[#334155]/50"
-                          }`}
-                        >
-                          {i + 1}
-                        </button>
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={() => setCurrentPage((p) => Math.min(pages.length - 1, p + 1))}
-                      disabled={currentPage === pages.length - 1}
-                      className="px-4 py-2 rounded-lg bg-[#1E293B]/50 border border-[#334155]/50 text-[#CBD5E1] hover:bg-[#334155]/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      Next →
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Conviction Heatmap */}
-          <ConvictionHeatmap signals={chartSignals} />
-
-          {/* Open Trades Section */}
-          <Card title="Open positions">
-            {open.length === 0 ? (
-              <p className="text-sm text-[#64748B]">No open positions yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-[#64748B]">
-                    <tr>
-                      <th className="py-2">Symbol</th>
-                      <th>Direction</th>
-                      <th>Entry</th>
-                      <th>Opened</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {open.map((t) => (
-                      <tr key={t.id} className="border-t border-[#334155]/50">
-                        <td className="py-2 font-mono text-white">{t.symbol}</td>
-                        <td className="capitalize text-[#CBD5E1]">{t.direction}</td>
-                        <td className="font-mono text-[#F59E0B]">{formatUsd(Number(t.entry_price))}</td>
-                        <td className="text-[#64748B]">
-                          {new Date(t.opened_at).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {pages.length > 1 && (
+              <div className="flex items-center justify-center gap-2 pt-4">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
+                  disabled={currentPage === 0}
+                  className="hud-label rounded border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--panel-2)] disabled:opacity-40 transition-colors duration-120"
+                >
+                  ← Prev
+                </button>
+                <span className="num text-xs text-[var(--muted)]">
+                  {currentPage + 1}/{pages.length}
+                </span>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(pages.length - 1, p + 1))}
+                  disabled={currentPage === pages.length - 1}
+                  className="hud-label rounded border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--panel-2)] disabled:opacity-40 transition-colors duration-120"
+                >
+                  Next →
+                </button>
               </div>
             )}
-          </Card>
-        </main>
+          </>
+        )}
       </div>
+
+      {/* ── Conviction heatmap ── */}
+      <ConvictionHeatmap signals={chartSignals} />
+
+      {/* ── Open positions ── */}
+      <Card title="Open positions">
+        {open.length === 0 ? (
+          <p className="text-sm text-[var(--muted)]">No open positions yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left">
+                <tr>
+                  <th className="hud-label py-2 font-semibold">Symbol</th>
+                  <th className="hud-label font-semibold">Direction</th>
+                  <th className="hud-label font-semibold">Mode</th>
+                  <th className="hud-label font-semibold">Entry</th>
+                  <th className="hud-label font-semibold">Opened</th>
+                </tr>
+              </thead>
+              <tbody>
+                {open.map((t) => (
+                  <tr
+                    key={t.id}
+                    className="border-t border-[var(--border)] hover:bg-[var(--panel-2)] transition-colors duration-120"
+                  >
+                    <td className="num py-2 font-bold">{t.symbol}</td>
+                    <td
+                      className="capitalize"
+                      style={{
+                        color:
+                          t.direction === "bullish"
+                            ? "var(--bullish)"
+                            : t.direction === "bearish"
+                            ? "var(--bearish)"
+                            : "var(--muted)",
+                      }}
+                    >
+                      {t.direction}
+                    </td>
+                    <td>
+                      <span
+                        className="hud-label"
+                        style={{ color: t.mode && t.mode !== "paper" ? "var(--hud)" : "var(--muted)" }}
+                      >
+                        {t.mode ?? "paper"}
+                      </span>
+                    </td>
+                    <td className="num" style={{ color: "var(--hud)" }}>
+                      {formatUsd(Number(t.entry_price))}
+                    </td>
+                    <td className="num text-[var(--muted)]">
+                      {new Date(t.opened_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
