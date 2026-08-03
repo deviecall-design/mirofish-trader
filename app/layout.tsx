@@ -32,6 +32,7 @@ const NAV = [
   { href: "/journal",     label: "Journal" },
   { href: "/performance", label: "Performance" },
   { href: "/watchlist",   label: "Watchlist" },
+  { href: "/screener",   label: "Screener" },
 ];
 
 function StatusModule({
