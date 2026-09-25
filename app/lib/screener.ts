@@ -1,7 +1,7 @@
 // Stock screener — curated sector lists. Live quotes are fetched server-side
 // in app/lib/prices.ts (the browser cannot call Yahoo because of CORS).
 
-import { fetchMarketQuote, mapPool } from "./prices";
+import { fetchMarketQuotes } from "./prices";
 
 export interface ScreenerStock {
   symbol: string;
@@ -13,6 +13,8 @@ export interface ScreenerStock {
   marketCapB: number | null; // billions of the listing currency
   sparkline: number[]; // last 7 daily closes, oldest first
   sector: string;
+  /** YYYY-MM-DD when price is a daily close rather than a live quote. */
+  asOf: string | null;
 }
 
 export interface SectorMeta {
@@ -127,9 +129,12 @@ export function getAllSectors(): SectorMeta[] {
 export async function fetchScreenerData(sector: string): Promise<ScreenerStock[]> {
   const sectorData = SECTORS[sector];
   if (!sectorData) return [];
-  // A few at a time so a sector tab does not burst Yahoo into a 429.
-  return mapPool(sectorData.stocks, 4, async ({ symbol, name }) => {
-    const detail = await fetchMarketQuote(symbol);
+  const quotes = await fetchMarketQuotes(
+    sectorData.stocks.map((stock) => stock.symbol),
+    { sparkline: true }
+  );
+  return sectorData.stocks.map(({ symbol, name }, index) => {
+    const detail = quotes[index];
     return {
       symbol,
       name,
@@ -139,6 +144,7 @@ export async function fetchScreenerData(sector: string): Promise<ScreenerStock[]
       changePercent: detail.changePercent,
       marketCapB: detail.marketCapB,
       sparkline: detail.sparkline,
+      asOf: detail.asOf,
     };
   });
 }

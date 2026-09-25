@@ -10,6 +10,14 @@
 // currency.ts converts cents/pence for labels only.
 
 import { displayCurrency, quoteCurrencyForSymbol, toDisplay } from "./currency";
+import {
+  eodhdApiKey,
+  fetchEodhdDaily,
+  fetchEodhdRealtime,
+  isoDaysAgo,
+  resolveEodhdQuote,
+  toEodhdCode,
+} from "./eodhd";
 
 const CRYPTO_PAIRS: Record<string, string> = {
   BTC: "BTCUSDT",
@@ -33,7 +41,6 @@ const BROWSER_UA =
 
 const QUOTE_TTL_MS = 60_000;
 const HISTORY_TTL_MS = 5 * 60_000;
-const FAILURE_TTL_MS = 15_000;
 const QUOTE_TIMEOUT_MS = 8_000;
 
 export interface PriceQuote {
@@ -41,7 +48,9 @@ export interface PriceQuote {
   price: number;
   /** Provider quote currency, including minor units such as ZAc or GBp. */
   currency: string;
-  source: "binance" | "yahoo";
+  source: "binance" | "yahoo" | "eodhd";
+  /** Set when the price is a daily close rather than a live quote. */
+  asOf: string | null;
 }
 
 export interface MarketQuote {
@@ -50,7 +59,9 @@ export interface MarketQuote {
   changePercent: number | null;
   marketCapB: number | null;
   sparkline: number[];
-  source: "binance" | "yahoo" | null;
+  source: "binance" | "yahoo" | "eodhd" | null;
+  /** YYYY-MM-DD when `price` is the last daily close, otherwise null. */
+  asOf: string | null;
 }
 
 export interface OhlcvBar {
@@ -204,7 +215,35 @@ function emptyQuote(symbol: string): MarketQuote {
     marketCapB: null,
     sparkline: [],
     source: null,
+    asOf: null,
   };
+}
+
+function quoteCacheKey(symbol: string, sparkline: boolean) {
+  return sparkline ? `${symbol}:spark` : symbol;
+}
+
+function cachedQuote(symbol: string, sparkline: boolean): MarketQuote | undefined {
+  const now = Date.now();
+  if (sparkline) {
+    const spark = quoteCache.get(quoteCacheKey(symbol, true));
+    if (spark && spark.expires > now && spark.value.price != null) return spark.value;
+    return undefined;
+  }
+  for (const key of [quoteCacheKey(symbol, false), quoteCacheKey(symbol, true)]) {
+    const hit = quoteCache.get(key);
+    if (hit && hit.expires > now && hit.value.price != null) return hit.value;
+  }
+  return undefined;
+}
+
+function rememberQuote(symbol: string, value: MarketQuote, sparkline: boolean) {
+  if (value.price == null) return;
+  const entry = { expires: Date.now() + QUOTE_TTL_MS, value };
+  quoteCache.set(quoteCacheKey(symbol, false), entry);
+  if (sparkline && value.sparkline.length) {
+    quoteCache.set(quoteCacheKey(symbol, true), entry);
+  }
 }
 
 async function fetchBinanceTicker(pair: string): Promise<{
@@ -253,23 +292,20 @@ async function loadMarketQuote(symbol: string): Promise<MarketQuote> {
         marketCapB: null,
         sparkline,
         source: "binance",
+        asOf: null,
       };
     }
     const yahoo = await fetchYahooChart(`${symbol}-USD`, "10d", "1d");
     if (yahoo?.price != null) {
-      return {
-        price: yahoo.price,
-        currency: yahoo.currency ?? "USD",
-        changePercent: yahoo.changePercent,
-        marketCapB: null,
-        sparkline: yahoo.closes.slice(-7),
-        source: "yahoo",
-      };
+      return quoteFromYahoo(symbol, yahoo);
     }
     return emptyQuote(symbol);
   }
 
-  const yahoo = await fetchYahooChart(symbol, "10d", "1d");
+  return quoteFromYahoo(symbol, await fetchYahooChart(symbol, "10d", "1d"));
+}
+
+function quoteFromYahoo(symbol: string, yahoo: ParsedYahoo | null): MarketQuote {
   if (!yahoo || yahoo.price == null) return emptyQuote(symbol);
   return {
     price: yahoo.price,
@@ -278,29 +314,126 @@ async function loadMarketQuote(symbol: string): Promise<MarketQuote> {
     marketCapB: yahoo.marketCap != null ? yahoo.marketCap / 1e9 : null,
     sparkline: yahoo.closes.slice(-7),
     source: "yahoo",
+    asOf: null,
   };
 }
 
-export async function fetchMarketQuote(symbol: string): Promise<MarketQuote> {
-  const key = symbol.toUpperCase();
-  const hit = quoteCache.get(key);
-  if (hit && hit.expires > Date.now()) return hit.value;
-  const value = await loadMarketQuote(key);
-  quoteCache.set(key, {
-    expires: Date.now() + (value.price == null ? FAILURE_TTL_MS : QUOTE_TTL_MS),
-    value,
+async function loadEquityQuotes(symbols: string[], sparkline: boolean): Promise<MarketQuote[]> {
+  const out = symbols.map((symbol) => emptyQuote(symbol));
+  const apiKey = eodhdApiKey();
+  const mapped = symbols
+    .map((symbol, index) => ({ symbol, index, code: toEodhdCode(symbol) }))
+    .filter((row): row is { symbol: string; index: number; code: string } => row.code != null);
+
+  if (apiKey && mapped.length) {
+    const liveRows = await fetchEodhdRealtime(mapped.map((row) => row.code), apiKey);
+    const liveByCode = new Map(liveRows.map((row) => [row.code, row]));
+    const needDaily: typeof mapped = [];
+    for (const row of mapped) {
+      const live = liveByCode.get(row.code) ?? null;
+      if (live?.close != null && !sparkline) {
+        const resolved = resolveEodhdQuote(live, []);
+        if (resolved) {
+          out[row.index] = {
+            price: resolved.price,
+            currency: quoteCurrencyForSymbol(row.symbol),
+            changePercent: resolved.changePercent,
+            marketCapB: null,
+            sparkline: [],
+            source: "eodhd",
+            asOf: null,
+          };
+          continue;
+        }
+      }
+      needDaily.push(row);
+    }
+
+    const from = isoDaysAgo(sparkline ? 21 : 14);
+    await mapPool(needDaily, 4, async (row) => {
+      const bars = await fetchEodhdDaily(row.code, apiKey, from);
+      const resolved = resolveEodhdQuote(liveByCode.get(row.code) ?? null, bars);
+      if (!resolved) return;
+      out[row.index] = {
+        price: resolved.price,
+        currency: quoteCurrencyForSymbol(row.symbol),
+        changePercent: resolved.changePercent,
+        marketCapB: null,
+        sparkline: sparkline ? resolved.sparkline : [],
+        source: "eodhd",
+        asOf: resolved.asOf,
+      };
+    });
+  }
+
+  const missing = out
+    .map((quote, index) => (quote.price == null ? index : -1))
+    .filter((index) => index >= 0);
+  await mapPool(missing, 4, async (index) => {
+    out[index] = await loadMarketQuote(symbols[index]);
   });
-  return value;
+  return out;
+}
+
+export async function fetchMarketQuotes(
+  symbols: string[],
+  options: { sparkline?: boolean } = {}
+): Promise<MarketQuote[]> {
+  const sparkline = options.sparkline ?? false;
+  const keys = symbols.map((symbol) => symbol.toUpperCase());
+  const out: MarketQuote[] = new Array(keys.length);
+  const pending: number[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    const hit = cachedQuote(keys[i], sparkline);
+    if (hit) out[i] = hit;
+    else pending.push(i);
+  }
+  if (!pending.length) return out;
+
+  const pendingSymbols = pending.map((index) => keys[index]);
+  const cryptoIndexes: number[] = [];
+  const equityIndexes: number[] = [];
+  pendingSymbols.forEach((symbol, index) => {
+    (isCrypto(symbol) ? cryptoIndexes : equityIndexes).push(index);
+  });
+
+  const loaded = new Array<MarketQuote>(pendingSymbols.length);
+  await Promise.all([
+    mapPool(cryptoIndexes, 4, async (index) => {
+      loaded[index] = await loadMarketQuote(pendingSymbols[index]);
+    }),
+    (async () => {
+      if (!equityIndexes.length) return;
+      const equitySymbols = equityIndexes.map((index) => pendingSymbols[index]);
+      const quotes = await loadEquityQuotes(equitySymbols, sparkline);
+      equityIndexes.forEach((index, position) => {
+        loaded[index] = quotes[position];
+      });
+    })(),
+  ]);
+
+  pending.forEach((cacheIndex, position) => {
+    const value = loaded[position] ?? emptyQuote(keys[cacheIndex]);
+    rememberQuote(keys[cacheIndex], value, sparkline);
+    out[cacheIndex] = value;
+  });
+  return out;
+}
+
+export async function fetchMarketQuote(symbol: string): Promise<MarketQuote> {
+  const [quote] = await fetchMarketQuotes([symbol], { sparkline: true });
+  return quote;
 }
 
 export async function fetchPrice(symbol: string): Promise<PriceQuote | null> {
-  const quote = await fetchMarketQuote(symbol);
+  const [quote] = await fetchMarketQuotes([symbol], { sparkline: false });
   if (quote.price == null || quote.source == null) return null;
   return {
     symbol: symbol.toUpperCase(),
     price: quote.price,
     currency: quote.currency,
     source: quote.source,
+    asOf: quote.asOf,
   };
 }
 
@@ -340,6 +473,26 @@ async function loadHistory(symbol: string, bars: number): Promise<HistoryPayload
     return { currency: yahoo.currency ?? "USD", bars: yahoo.bars.slice(-bars) };
   }
 
+  const apiKey = eodhdApiKey();
+  const code = toEodhdCode(symbol);
+  if (apiKey && code) {
+    const from = isoDaysAgo(Math.ceil(bars * 1.8) + 10);
+    const daily = await fetchEodhdDaily(code, apiKey, from);
+    if (daily.length) {
+      return {
+        currency: quoteCurrencyForSymbol(symbol),
+        bars: daily.slice(-bars).map((bar) => ({
+          timestamp: `${bar.date}T00:00:00.000Z`,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume,
+        })),
+      };
+    }
+  }
+
   const yahoo = await fetchYahooChart(symbol, "2y", "1d");
   if (!yahoo?.bars.length) return null;
   return {
@@ -351,12 +504,9 @@ async function loadHistory(symbol: string, bars: number): Promise<HistoryPayload
 async function historyFor(symbol: string, bars: number): Promise<HistoryPayload | null> {
   const key = `${symbol.toUpperCase()}:${bars}`;
   const hit = historyCache.get(key);
-  if (hit && hit.expires > Date.now()) return hit.value;
+  if (hit && hit.expires > Date.now() && hit.value) return hit.value;
   const value = await loadHistory(symbol.toUpperCase(), bars);
-  historyCache.set(key, {
-    expires: Date.now() + (value ? HISTORY_TTL_MS : FAILURE_TTL_MS),
-    value,
-  });
+  if (value) historyCache.set(key, { expires: Date.now() + HISTORY_TTL_MS, value });
   return value;
 }
 

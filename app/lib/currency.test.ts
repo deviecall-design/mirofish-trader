@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   PRICE_UNAVAILABLE,
+  formatCloseAsOf,
   formatMarketCap,
   formatMoney,
   quoteCurrencyForSymbol,
   toDisplay,
 } from "./currency";
+
+describe("formatCloseAsOf", () => {
+  it("labels a daily close with the day and month", () => {
+    expect(formatCloseAsOf("2026-09-17")).toBe("close 17 Sep");
+    expect(formatCloseAsOf("nope")).toBe("last close");
+  });
+});
 
 describe("quoteCurrencyForSymbol", () => {
   it("maps each market suffix", () => {

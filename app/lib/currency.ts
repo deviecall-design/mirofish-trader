@@ -5,6 +5,17 @@
 
 export const PRICE_UNAVAILABLE = "price unavailable";
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Label a daily close that is not a live quote, e.g. "close 17 Sep". */
+export function formatCloseAsOf(isoDate: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!match) return "last close";
+  const month = MONTHS[Number(match[2]) - 1];
+  if (!month) return "last close";
+  return `close ${Number(match[3])} ${month}`;
+}
+
 const MINOR_UNITS: Record<string, { currency: string; divisor: number }> = {
   GBp: { currency: "GBP", divisor: 100 },
   GBX: { currency: "GBP", divisor: 100 },

@@ -11,6 +11,7 @@ export default defineConfig({
       "app/lib/currency.test.ts",
       "app/lib/tickers.test.ts",
       "app/lib/prices.test.ts",
+      "app/lib/eodhd.test.ts",
     ],
     environment: "node",
   },

@@ -3,13 +3,14 @@ import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ResponsiveContainer, LineChart, Line } from "recharts";
-import { formatMarketCap, formatMoney, PRICE_UNAVAILABLE } from "@/app/lib/currency";
+import { formatCloseAsOf, formatMarketCap, formatMoney, PRICE_UNAVAILABLE } from "@/app/lib/currency";
 
 const StockChart = dynamic(() => import("@/app/components/StockChart"), { ssr: false });
 
 interface Stock {
   symbol: string; name: string; price: number | null; currency: string;
   changePercent: number | null; marketCapB: number | null; sparkline: number[];
+  asOf?: string | null;
 }
 interface Sector { id: string; label: string; }
 interface ChartData { candles: object[]; sma: object[]; }
@@ -29,6 +30,11 @@ function Sparkline({ data, pos }: { data: number[]; pos: boolean }) {
 function priceLabel(stock: { price: number | null; currency?: string }) {
   if (stock.price == null) return PRICE_UNAVAILABLE;
   return formatMoney(stock.price, stock.currency || "USD");
+}
+
+function CloseNote({ asOf }: { asOf?: string | null }) {
+  if (!asOf) return null;
+  return <span className="block text-[10px] leading-tight text-white/40">{formatCloseAsOf(asOf)}</span>;
 }
 
 export default function ScreenerPage() {
@@ -124,7 +130,10 @@ export default function ScreenerPage() {
                     className={`border-b border-white/5 cursor-pointer transition-colors ${isSel?"bg-[#f0b429]/5 border-l-2 border-l-[#f0b429]":"hover:bg-white/3"}`}>
                     <td className="px-6 py-3 font-bold text-white">{s.symbol}</td>
                     <td className="py-3 text-white/40 hidden md:table-cell text-xs">{s.name}</td>
-                    <td className={`py-3 text-right ${s.price == null ? "text-white/40 text-xs" : "text-white"}`}>{priceLabel(s)}</td>
+                    <td className={`py-3 text-right ${s.price == null ? "text-white/40 text-xs" : "text-white"}`}>
+                      {priceLabel(s)}
+                      {s.price != null && <CloseNote asOf={s.asOf} />}
+                    </td>
                     <td className={`py-3 text-right font-bold ${s.changePercent == null ? "text-white/30" : pos ? "text-green-400" : "text-red-400"}`}>
                       {s.changePercent != null ? `${pos?"+":""}${s.changePercent.toFixed(2)}%` : "—"}
                     </td>
@@ -153,7 +162,10 @@ export default function ScreenerPage() {
 
             {/* Price header */}
             <div className="flex items-end gap-3 mb-4">
-              <span className={`text-3xl font-bold ${selected.price == null ? "text-white/40 text-lg" : "text-white"}`}>{priceLabel(selected)}</span>
+              <span className={`text-3xl font-bold ${selected.price == null ? "text-white/40 text-lg" : "text-white"}`}>
+                {priceLabel(selected)}
+                {selected.price != null && <CloseNote asOf={selected.asOf} />}
+              </span>
               <span className={`text-sm font-bold mb-1 ${(selected.changePercent??0)>=0?"text-green-400":"text-red-400"}`}>
                 {selected.changePercent != null ? `${(selected.changePercent>=0)?"+":""}${selected.changePercent.toFixed(2)}%` : ""}
               </span>
