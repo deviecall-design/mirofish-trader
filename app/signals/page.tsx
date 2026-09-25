@@ -3,6 +3,7 @@ import { ConvictionBarChart, ConvictionBarDatum } from "../components/charts/Con
 import { SignalConvictionTimeline } from "../components/charts/SignalConvictionTimeline";
 import { supabase, SignalRow } from "../lib/supabase";
 import { SignalActions } from "./SignalActions";
+import ConsensusStrip from "../components/ConsensusStrip";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +87,10 @@ export default async function SignalsPage() {
                     <StatusBadge status={s.status} />
                   </div>
                   <p className="mt-2 text-sm text-[var(--muted)]">{s.summary}</p>
-                  <p className="mt-1 text-xs text-[var(--muted)]">
+                  <div className="mt-3 max-w-md">
+                    <ConsensusStrip direction={s.direction} conviction={s.conviction} />
+                  </div>
+                  <p className="num mt-1 text-xs text-[var(--muted)]">
                     {new Date(s.created_at).toLocaleString()}
                     {s.price ? ` · price $${Number(s.price).toFixed(2)}` : ""}
                   </p>

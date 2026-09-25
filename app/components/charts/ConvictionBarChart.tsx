@@ -8,10 +8,11 @@ export interface ConvictionBarDatum {
   direction: string;
 }
 
+// Quiet Swarm chart semantics (DESIGN.md): mint bull, rose bear, gray neutral.
 const COLORS = {
-  bullish: "#3ee0a1",
-  bearish: "#ff6b6b",
-  neutral: "#f1c40f",
+  bullish: "#2fe6a0",
+  bearish: "#ff5c7a",
+  neutral: "#8a93a6",
 } as const;
 
 function colorFor(direction: string): string {

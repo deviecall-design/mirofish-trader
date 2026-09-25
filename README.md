@@ -33,6 +33,7 @@ fixed `mirofish_owner()` and seeds the default watchlist
 - `/watchlist` — symbols + themes, add new symbols
 - `POST /api/telegram` — Telegram webhook (`/approve SYM`, `/ignore SYM`)
 - `GET /api/cron/scan` — 15-min scan job (Vercel cron)
+- `POST /api/jarvis` — Jarvis assistant (Claude tool-use; backs the chat panel)
 
 ## How it works
 
@@ -47,6 +48,44 @@ fixed `mirofish_owner()` and seeds the default watchlist
 5. Approving (via Telegram or the Signals page) opens a paper trade at the
    current price with TP +5% and SL -3%.
 6. Each scan also closes open trades that have hit TP or SL.
+
+## Jarvis assistant
+
+Every page has a floating ⚡ button (bottom right) that opens Jarvis — a
+Claude-powered chat panel with push-to-talk voice input and optional spoken
+replies. It can answer questions (positions, P&L, pending signals, live
+prices), run swarm simulations on demand, and approve/ignore signals. Any
+approval shows an explicit Confirm/Cancel card first; Jarvis can never place
+an order on its own. Requires `ANTHROPIC_API_KEY`.
+
+## Live execution (Binance, testnet-first)
+
+By default every trade is paper. To enable real execution for crypto symbols
+(BTC, ETH — equities always stay paper):
+
+1. Run `supabase/migrations/20260705_orders_and_trade_mode.sql` in the
+   Supabase SQL editor (adds `trades.mode` and the `orders` audit table).
+2. Create testnet API keys at https://testnet.binance.vision and set
+   `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `EXECUTION_ENABLED=true`
+   (leave `BINANCE_TESTNET=true`).
+3. Approve a crypto signal and verify end-to-end: market fill at the real
+   price, an OCO TP/SL order on the exchange, `mode=testnet` in the journal,
+   and the cron closing the trade from the real exchange fill.
+4. **Go live only after step 3 passes:** swap in production API keys and set
+   `BINANCE_TESTNET=false`. Keep `MAX_POSITION_USD` small at first.
+
+Safety rails, all enforced in code before any order is sent:
+
+- Human approval required for every order (dashboard, Telegram, or Jarvis).
+- Risk guard: `MAX_POSITION_USD`, `MAX_OPEN_POSITIONS`,
+  `DAILY_LOSS_LIMIT_USD`, and `KILL_SWITCH=true` to block all execution
+  instantly.
+- TP/SL is placed as a real OCO order on Binance at entry time, so exits
+  trigger in real time rather than on the 15-minute cron (the cron just syncs
+  fill status back to the journal).
+- Bearish signals stay paper (spot Binance has no shorting); a blocked or
+  failed real order leaves the signal pending and notifies Telegram — it is
+  never silently converted to a paper fill.
 
 ## Telegram setup
 

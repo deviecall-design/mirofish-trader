@@ -13,11 +13,7 @@ export function Card({
     <section
       className={`rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 ${className}`}
     >
-      {title && (
-        <h3 className="text-sm font-medium text-[var(--muted)] mb-3 uppercase tracking-wider">
-          {title}
-        </h3>
-      )}
+      {title && <h3 className="hud-label mb-3">{title}</h3>}
       {children}
     </section>
   );
@@ -43,10 +39,10 @@ export function Stat({
       ? "text-[var(--neutral)]"
       : "";
   return (
-    <Card>
-      <div className="text-xs uppercase tracking-wider text-[var(--muted)]">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${color}`}>{value}</div>
-      {hint && <div className="mt-1 text-xs text-[var(--muted)]">{hint}</div>}
+    <Card className="hud-corners">
+      <div className="hud-label">{label}</div>
+      <div className={`num mt-1 text-[28px] font-medium ${color}`}>{value}</div>
+      {hint && <div className="num mt-1 text-xs text-[var(--muted)]">{hint}</div>}
     </Card>
   );
 }

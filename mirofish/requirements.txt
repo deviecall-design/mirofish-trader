@@ -1,0 +1,13 @@
+# MiroFish quant integration — minimal deps (tests & mock backtests run with just these)
+numpy
+pandas
+pytest
+
+# To run the REAL pre-trained Kronos model, additionally install the
+# dependencies from the Kronos repo (https://github.com/shiyu-coder/Kronos):
+#   torch>=2.0.0
+#   einops==0.8.1
+#   huggingface_hub==0.33.1
+#   safetensors==0.6.2
+#   tqdm==4.67.1
+# then clone the repo and set KRONOS_REPO_PATH to the clone's root.
