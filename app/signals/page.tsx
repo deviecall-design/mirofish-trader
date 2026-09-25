@@ -1,4 +1,5 @@
 import { Card } from "../components/Card";
+import { formatMoney, quoteCurrencyForSymbol } from "../lib/currency";
 import { ConvictionBarChart, ConvictionBarDatum } from "../components/charts/ConvictionBarChart";
 import { SignalConvictionTimeline } from "../components/charts/SignalConvictionTimeline";
 import { supabase, SignalRow } from "../lib/supabase";
@@ -92,7 +93,7 @@ export default async function SignalsPage() {
                   </div>
                   <p className="num mt-1 text-xs text-[var(--muted)]">
                     {new Date(s.created_at).toLocaleString()}
-                    {s.price ? ` · price $${Number(s.price).toFixed(2)}` : ""}
+                    {s.price ? ` · price ${formatMoney(Number(s.price), quoteCurrencyForSymbol(s.symbol))}` : ""}
                   </p>
                 </div>
                 {s.status === "pending" && <SignalActions signal={s} />}

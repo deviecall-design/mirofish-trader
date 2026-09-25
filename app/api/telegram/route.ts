@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { supabase } from "@/app/lib/supabase";
+import { formatMoney, quoteCurrencyForSymbol } from "@/app/lib/currency";
 import { fetchPrice } from "@/app/lib/prices";
 import { sendTelegram } from "@/app/lib/telegram";
 
@@ -83,8 +84,9 @@ export async function POST(req: NextRequest) {
   });
 
   await sendTelegram(
-    `✅ Opened paper position: <b>${symbol}</b> ${signal.direction} @ $${entryPrice.toFixed(
-      2
+    `✅ Opened paper position: <b>${symbol}</b> ${signal.direction} @ ${formatMoney(
+      entryPrice,
+      quote?.currency ?? quoteCurrencyForSymbol(symbol)
     )}\nTP +5% / SL -3%`,
     chatId
   );
