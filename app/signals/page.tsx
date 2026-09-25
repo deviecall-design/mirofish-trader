@@ -4,6 +4,7 @@ import { SignalConvictionTimeline } from "../components/charts/SignalConvictionT
 import { supabase, SignalRow } from "../lib/supabase";
 import { SignalActions } from "./SignalActions";
 import ConsensusStrip from "../components/ConsensusStrip";
+import { STALE_SIGNAL_AFTER_DAYS, formatSignalAge, isStaleSignal } from "../lib/freshness";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,9 @@ export default async function SignalsPage() {
       <header>
         <h1 className="text-2xl font-semibold">Signals</h1>
         <p className="text-sm text-[var(--muted)] mt-1">
-          Live MiroFish sentiment feed. Approve to open a paper position; ignore to dismiss.
+          Stored signals from the scanner. The score is a Monte Carlo estimate, not a live vote.
+          Approve opens a paper trade for a bullish or bearish signal. Neutral does not open a trade.
+          A signal older than {STALE_SIGNAL_AFTER_DAYS} days is marked stale.
         </p>
       </header>
 
@@ -59,7 +62,7 @@ export default async function SignalsPage() {
       {signals.length === 0 ? (
         <Card>
           <p className="text-sm text-[var(--muted)]">
-            No signals yet. The cron worker emits a signal whenever a watchlist symbol moves ±2%.
+            No signals yet. The scheduled scan stores a signal when a watchlist symbol moves ±2%.
           </p>
         </Card>
       ) : (
@@ -82,8 +85,14 @@ export default async function SignalsPage() {
                       {s.direction}
                     </span>
                     <span className="text-sm text-[var(--muted)]">
-                      conviction {s.conviction}/100
+                      model score {s.conviction}/100
                     </span>
+                    <span className="text-sm text-[var(--muted)]">{formatSignalAge(s.created_at)}</span>
+                    {isStaleSignal(s.created_at) && (
+                      <span className="px-2 py-0.5 rounded text-xs uppercase tracking-wider bg-[var(--bearish)]/15 text-[var(--bearish)]">
+                        stale
+                      </span>
+                    )}
                     <StatusBadge status={s.status} />
                   </div>
                   <p className="mt-2 text-sm text-[var(--muted)]">{s.summary}</p>

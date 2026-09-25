@@ -4,9 +4,9 @@ import { fetchPrice } from "@/app/lib/prices";
 import { getLastPrice } from "@/app/lib/lastPrices";
 import { runSwarm } from "@/app/lib/mirofish";
 import { sendTelegram } from "@/app/lib/telegram";
-import { getMacroBias } from "@/app/lib/macroBias";
-import { getSocialBias } from "@/app/lib/socialBias";
-import { breakdownToPercentages } from "@/app/lib/archetypeUtils";
+import { getMacroBiasReport } from "@/app/lib/macroBias";
+import { getSocialBiasReport } from "@/app/lib/socialBias";
+import { formatInputLine } from "@/app/lib/inputAvailability";
 import { binanceBroker } from "@/app/lib/brokers/binance";
 import {
   MOVE_THRESHOLD_PCT,
@@ -39,6 +39,17 @@ interface ScanResult {
   scanned: string[];
   newSignals: { symbol: string; direction: string; conviction: number }[];
   closedTrades: { symbol: string; pnl: number; reason: string }[];
+  errors: { symbol: string; error: string }[];
+}
+
+// A failed Telegram send must not abort the rest of the scan. Notification
+// is not required to record a close or a signal, and it never places an order.
+async function notify(message: string) {
+  try {
+    await sendTelegram(message);
+  } catch (err) {
+    console.error("Telegram notify failed:", err);
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -113,7 +124,7 @@ async function syncRealTrade(trade: TradeRow, result: ScanResult) {
   });
 
   const emoji = pnl >= 0 ? "🟢" : "🔴";
-  await sendTelegram(
+  await notify(
     `${emoji} <b>${trade.symbol}</b> closed on exchange (${reason}) ` +
       `at $${exitPrice.toFixed(2)} — P&amp;L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}% [${trade.mode}]`
   );
@@ -121,7 +132,7 @@ async function syncRealTrade(trade: TradeRow, result: ScanResult) {
 
 async function runScan(): Promise<ScanResult> {
   const sb = supabase();
-  const result: ScanResult = { scanned: [], newSignals: [], closedTrades: [] };
+  const result: ScanResult = { scanned: [], newSignals: [], closedTrades: [], errors: [] };
 
   // 1. Auto-close open trades that hit TP/SL.
   const { data: openTrades } = await sb
@@ -164,7 +175,7 @@ async function runScan(): Promise<ScanResult> {
     });
 
     const emoji = close === "tp" ? "🟢" : "🔴";
-    await sendTelegram(
+    await notify(
       `${emoji} <b>${trade.symbol}</b> closed (${close === "tp" ? "TP" : "SL"}) ` +
         `at $${quote.price.toFixed(2)} — P&amp;L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%`
     );
@@ -184,7 +195,8 @@ async function runScan(): Promise<ScanResult> {
 
     if (previous == null) {
       // First observation — store baseline as a neutral, ignored signal.
-      await sb.from("signals").insert({
+      // Ignored so it cannot be approved into a trade.
+      const { error: baseErr } = await sb.from("signals").insert({
         symbol: row.symbol,
         direction: "neutral",
         conviction: 0,
@@ -192,61 +204,59 @@ async function runScan(): Promise<ScanResult> {
         status: "ignored",
         price: quote.price,
       });
+      if (baseErr) result.errors.push({ symbol: row.symbol, error: baseErr.message });
       continue;
     }
 
     const move = pctMove(quote.price, previous);
     if (Math.abs(move) < MOVE_THRESHOLD_PCT) continue;
 
-    // Fetch real biases (with error handling)
-    let macroBias = 0;
-    let socialBias = 0;
-
-    try {
-      macroBias = await getMacroBias();
-    } catch (err) {
+    // A failed feed is a 0 with available:false, which is written into the
+    // summary. The signals table has no extra column for this (meta does
+    // not exist — inserting it used to reject every new signal).
+    const macro = await getMacroBiasReport().catch((err: unknown) => {
       console.error("Failed to fetch macro bias:", err);
-      macroBias = 0;
-    }
-
-    try {
-      socialBias = await getSocialBias(row.symbol);
-    } catch (err) {
+      return {
+        value: 0,
+        available: false,
+        detail: err instanceof Error ? err.message : "macro feed failed",
+      };
+    });
+    const social = await getSocialBiasReport(row.symbol).catch((err: unknown) => {
       console.error(`Failed to fetch social bias for ${row.symbol}:`, err);
-      socialBias = 0;
-    }
+      return {
+        value: 0,
+        available: false,
+        detail: err instanceof Error ? err.message : "social feed failed",
+      };
+    });
 
     const swarm = runSwarm({
       symbol: row.symbol,
       price: quote.price,
       pctChange: move,
       recentTrend: move / 5,
-      macroBias,
-      socialBias,
+      macroBias: macro.value,
+      socialBias: social.value,
     });
 
-    // Convert archetype breakdown to percentages
-    const archetypePercentages = breakdownToPercentages(
-      swarm.archetypeBreakdown,
-      swarm.direction
-    );
-
-    const { data: inserted } = await sb
+    const { data: inserted, error: insertError } = await sb
       .from("signals")
       .insert({
         symbol: row.symbol,
         direction: swarm.direction,
         conviction: swarm.conviction,
-        summary: swarm.summary,
+        summary: `${swarm.summary} ${formatInputLine(macro, social)}`,
         status: "pending",
         price: quote.price,
-        // Store archetype breakdown as JSON (if supported; otherwise gracefully ignored)
-        meta: JSON.stringify({
-          archetypeBreakdown: archetypePercentages,
-        }),
       })
       .select("*")
       .single();
+
+    if (insertError) {
+      result.errors.push({ symbol: row.symbol, error: insertError.message });
+      continue;
+    }
 
     if (inserted) {
       result.newSignals.push({
@@ -254,9 +264,9 @@ async function runScan(): Promise<ScanResult> {
         direction: swarm.direction,
         conviction: swarm.conviction,
       });
-      await sendTelegram(
+      await notify(
         `🐟 <b>MiroFish Signal</b>: ${row.symbol} ${swarm.direction} ` +
-          `(conviction: ${swarm.conviction}/100)\n${swarm.summary}\n` +
+          `(model score: ${swarm.conviction}/100)\n${swarm.summary}\n` +
           `Reply <code>/approve ${row.symbol}</code> or <code>/ignore ${row.symbol}</code>`
       );
     }

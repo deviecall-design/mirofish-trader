@@ -5,7 +5,14 @@ import { defineConfig } from "vitest/config";
 // installed runner and are excluded until they are migrated.
 export default defineConfig({
   test: {
-    include: ["app/lib/risk.test.ts", "app/lib/brokers/**/*.test.ts"],
+    include: [
+      "app/lib/risk.test.ts",
+      "app/lib/brokers/**/*.test.ts",
+      "app/lib/pnl.test.ts",
+      "app/lib/freshness.test.ts",
+      "app/lib/signalPolicy.test.ts",
+      "app/lib/inputAvailability.test.ts",
+    ],
     environment: "node",
   },
 });

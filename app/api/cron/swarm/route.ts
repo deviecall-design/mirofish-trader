@@ -234,8 +234,8 @@ async function runSwarmAgent(symbolFilter?: string): Promise<SwarmResult> {
         thesis.action === "BUY" ? "bullish" : thesis.action === "SELL" ? "bearish" : "neutral";
 
       // thesis.rationale already carries the expected return, price target, and
-      // sentiment detail in prose — the signals table has no `meta`/JSON column
-      // to store it separately (see scan/route.ts, which has the same gap).
+      // sentiment detail in prose. The signals table has no JSON column; the
+      // price scan records input availability in the summary text instead.
       const { data: inserted, error: insertError } = await sb
         .from("signals")
         .insert({

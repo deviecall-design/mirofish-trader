@@ -2,43 +2,28 @@
 
 import { useEffect, useState } from "react";
 import { supabase, type SignalRow } from "../lib/supabase";
+import { formatSignalAge, isStaleSignal } from "../lib/freshness";
 
-// Agent Wire — header ticker cycling agent dispatches every ~4s, derived from
-// real recent signals so it never feels fabricated. See DESIGN.md.
+// Header tape. These lines are stored signals, not agents dispatching orders.
 
 interface WireLine {
-  agent: string;
   msg: string;
   action: string;
   tone: "bull" | "bear" | "flat";
 }
 
-const VERBS: Record<string, string[]> = {
-  bullish: ["momentum divergence", "breakout confirmation", "accumulation pattern"],
-  bearish: ["distribution signal", "funding rate anomaly", "momentum exhaustion"],
-  neutral: ["mixed archetype votes", "consensus split", "range compression"],
-};
-
-function linesFromSignals(signals: SignalRow[]): WireLine[] {
-  return signals.slice(0, 8).map((s, i) => {
-    const verbs = VERBS[s.direction] ?? VERBS.neutral;
-    const agentId = String(((s.conviction + 7) * 137 + i * 61) % 1000).padStart(4, "0");
-    return {
-      agent: `AGENT-${agentId}`,
-      msg: `${verbs[i % verbs.length]} ${s.symbol}`,
-      action:
-        s.direction === "bullish"
-          ? "flipped LONG"
-          : s.direction === "bearish"
-          ? "flipped SHORT"
-          : `conf 0.${String(Math.max(s.conviction, 10)).padStart(2, "0")}`,
-      tone: s.direction === "bullish" ? "bull" : s.direction === "bearish" ? "bear" : "flat",
-    };
-  });
+function linesFromSignals(signals: SignalRow[], now: number): WireLine[] {
+  return signals.slice(0, 8).map((s) => ({
+    msg: `${s.symbol} ${s.direction}`,
+    action: `${formatSignalAge(s.created_at, now)} · score ${s.conviction}/100${
+      isStaleSignal(s.created_at, now) ? " · stale" : ""
+    }`,
+    tone: s.direction === "bullish" ? "bull" : s.direction === "bearish" ? "bear" : "flat",
+  }));
 }
 
 const FALLBACK: WireLine[] = [
-  { agent: "AGENT-0447", msg: "swarm initialising", action: "1000 agents online", tone: "flat" },
+  { msg: "no stored signals", action: "scanner has not written a row", tone: "flat" },
 ];
 
 export default function AgentWire() {
@@ -47,13 +32,14 @@ export default function AgentWire() {
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
+    const now = Date.now();
     supabase()
       .from("signals")
       .select("symbol,direction,conviction,created_at")
       .order("created_at", { ascending: false })
       .limit(8)
       .then(({ data }) => {
-        if (data?.length) setLines(linesFromSignals(data as SignalRow[]));
+        if (data?.length) setLines(linesFromSignals(data as SignalRow[], now));
       });
   }, []);
 
@@ -75,7 +61,7 @@ export default function AgentWire() {
       style={{ opacity: visible ? 1 : 0 }}
       aria-live="off"
     >
-      <span style={{ color: "var(--hud)" }}>{line.agent}</span>
+      <span style={{ color: "var(--hud)" }}>Stored signal</span>
       {" → "}
       {line.msg}
       {" → "}

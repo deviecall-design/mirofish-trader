@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TradeRow } from "../lib/supabase";
+import { performanceFromTrades } from "../lib/pnl";
 
 // EquityCurve — custom SVG chart following DESIGN.md chart law: horizontal
 // gridlines only, mono tick labels, 1.5px line, ≤12% area gradient, one
@@ -26,16 +27,8 @@ export default function EquityCurve({ trades, height = 200 }: { trades: TradeRow
   }, []);
 
   const points = useMemo(() => {
-    const closed = trades
-      .filter((t) => t.status === "closed" && t.closed_at)
-      .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime());
-    let cum = 0;
-    const pts = [{ x: 0, v: 0 }];
-    for (const t of closed) {
-      cum += Number(t.pnl ?? 0);
-      pts.push({ x: pts.length, v: cum });
-    }
-    return pts;
+    const curve = performanceFromTrades(trades).equityCurve;
+    return [{ x: 0, v: 0 }, ...curve.map((p, i) => ({ x: i + 1, v: p.returnPct }))];
   }, [trades]);
 
   if (points.length < 2) {
@@ -86,7 +79,7 @@ export default function EquityCurve({ trades, height = 200 }: { trades: TradeRow
               <line x1="0" x2={width} y1={y} y2={y} stroke="var(--border)" strokeOpacity="0.5" />
               <text x="4" y={y - 4} className="num" fontSize="10" fill="var(--muted)">
                 {v >= 0 ? "+" : ""}
-                {v.toFixed(0)}%
+                {v.toFixed(Math.abs(max - min) < 20 ? 1 : 0)}%
               </text>
             </g>
           );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { recordJarvisFailure, recordJarvisSuccess } from "../lib/jarvisClientStatus";
 
 // JarvisChat — the conversation surface (messages, confirm cards, voice
 // input). Embedded as the cockpit console on the dashboard and inside the
@@ -97,6 +98,7 @@ export default function JarvisChat({ heightClass = "max-h-[55vh] min-h-[160px]" 
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        recordJarvisSuccess();
 
         const confirm = extractConfirm(data.toolEvents ?? []);
         setEntries((prev) => [
@@ -108,11 +110,13 @@ export default function JarvisChat({ heightClass = "max-h-[55vh] min-h-[160px]" 
           speechSynthesis.speak(new SpeechSynthesisUtterance(data.reply));
         }
       } catch (err) {
+        const message = err instanceof Error ? err.message : "request failed";
+        recordJarvisFailure(message);
         setEntries((prev) => [
           ...prev,
           {
             role: "assistant",
-            text: `⚠️ ${err instanceof Error ? err.message : "request failed"}`,
+            text: `⚠️ ${message}`,
           },
         ]);
       } finally {
@@ -157,9 +161,9 @@ export default function JarvisChat({ heightClass = "max-h-[55vh] min-h-[160px]" 
       >
         {entries.length === 0 && (
           <p className="text-[var(--muted)] text-xs leading-relaxed">
-            Ask “what’s pending?”, “show my open positions”, “run the swarm on
-            BTC”, or “approve DRO”. Orders are only ever placed after you
-            explicitly confirm.
+            Jarvis answers from your stored signals and paper trades. “Run the
+            swarm” is a Monte Carlo simulation (1,000 virtual runs), not a
+            live desk. Orders are only placed after you explicitly confirm.
           </p>
         )}
         {entries.map((entry, i) => (
