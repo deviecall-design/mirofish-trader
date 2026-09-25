@@ -1,19 +1,20 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!url || !anonKey) {
-  throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY"
-  );
-}
-
+// Created on first use, not at import. Preview builds do not have the
+// NEXT_PUBLIC_ Supabase vars, and throwing here used to fail `next build`
+// while route modules were loaded ("Collecting page data").
 let cached: SupabaseClient | null = null;
 
 export function supabase(): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY"
+    );
+  }
   if (!cached) {
-    cached = createClient(url!, anonKey!, {
+    cached = createClient(url, anonKey, {
       auth: { persistSession: false },
     });
   }

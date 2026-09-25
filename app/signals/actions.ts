@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabase } from "../lib/supabase";
 import { sendTelegram } from "../lib/telegram";
 import { executeEntry, RiskRejectionError } from "../lib/execution";
+import { OrderUnauthorizedError } from "../lib/orderAuth";
 
 export async function approveSignal(signalId: string) {
   const sb = supabase();
@@ -30,7 +31,9 @@ export async function approveSignal(signalId: string) {
     await sendTelegram(
       err instanceof RiskRejectionError
         ? `🛑 <b>${signal.symbol}</b> order blocked by risk guard: ${message}`
-        : `⚠️ <b>${signal.symbol}</b> execution failed, signal still pending: ${message}`
+        : err instanceof OrderUnauthorizedError
+          ? `🛑 <b>${signal.symbol}</b> broker order refused: caller is not authenticated. Signal still pending.`
+          : `⚠️ <b>${signal.symbol}</b> execution failed, signal still pending: ${message}`
     );
     throw err;
   }

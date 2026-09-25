@@ -1,5 +1,7 @@
 // Binance spot adapter — signed REST via node:crypto, no SDK dependency.
-// Testnet-first: points at testnet.binance.vision unless BINANCE_TESTNET=false.
+// Testnet-first. The production host is used only when live trading is
+// explicitly opted in (see liveTradingEnabled). BINANCE_TESTNET=false alone
+// does not point at real money.
 
 import { createHmac } from "node:crypto";
 import type { BrokerAdapter, OcoStatus, PlacedOrder } from "./types";
@@ -14,8 +16,20 @@ export function toPair(symbol: string): string | null {
   return PAIRS[symbol.toUpperCase()] ?? null;
 }
 
+/**
+ * Real-money Binance (api.binance.com) is off unless both are set:
+ * LIVE_TRADING_ENABLED=true (the opt-in; default off) and
+ * BINANCE_TESTNET=false (the existing testnet brake).
+ */
+export function liveTradingEnabled(): boolean {
+  return (
+    process.env.LIVE_TRADING_ENABLED === "true" &&
+    process.env.BINANCE_TESTNET === "false"
+  );
+}
+
 export function baseUrl(): string {
-  return process.env.BINANCE_TESTNET === "false"
+  return liveTradingEnabled()
     ? "https://api.binance.com"
     : "https://testnet.binance.vision";
 }

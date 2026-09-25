@@ -66,17 +66,25 @@ By default every trade is paper. To enable real execution for crypto symbols
 1. Run `supabase/migrations/20260705_orders_and_trade_mode.sql` in the
    Supabase SQL editor (adds `trades.mode` and the `orders` audit table).
 2. Create testnet API keys at https://testnet.binance.vision and set
-   `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `EXECUTION_ENABLED=true`
-   (leave `BINANCE_TESTNET=true`).
-3. Approve a crypto signal and verify end-to-end: market fill at the real
-   price, an OCO TP/SL order on the exchange, `mode=testnet` in the journal,
-   and the cron closing the trade from the real exchange fill.
+   `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `EXECUTION_ENABLED=true`,
+   and `TRADING_API_SECRET` (leave `BINANCE_TESTNET=true` and
+   `LIVE_TRADING_ENABLED=false`).
+3. Approve a bullish BTC or ETH signal with
+   `Authorization: Bearer $TRADING_API_SECRET` on the request. The dashboard
+   Approve button and Jarvis do not send that header, so they cannot place
+   a broker order. Verify end-to-end: market fill at the real testnet price,
+   an OCO TP/SL order on the exchange, `mode=testnet` in the journal, and
+   the cron closing the trade from the exchange fill.
 4. **Go live only after step 3 passes:** swap in production API keys and set
-   `BINANCE_TESTNET=false`. Keep `MAX_POSITION_USD` small at first.
+   both `BINANCE_TESTNET=false` and `LIVE_TRADING_ENABLED=true`. Either one
+   alone stays on testnet. Keep `MAX_POSITION_USD` small at first. The same
+   bearer secret is still required on the request.
 
 Safety rails, all enforced in code before any order is sent:
 
-- Human approval required for every order (dashboard, Telegram, or Jarvis).
+- Human approval is still required in the Jarvis prompt, and every broker
+  order also requires `Authorization: Bearer $TRADING_API_SECRET`. Telegram
+  `/approve` opens a paper trade only; it does not call Binance.
 - Risk guard: `MAX_POSITION_USD`, `MAX_OPEN_POSITIONS`,
   `DAILY_LOSS_LIMIT_USD`, and `KILL_SWITCH=true` to block all execution
   instantly.
