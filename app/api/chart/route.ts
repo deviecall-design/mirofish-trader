@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { fetchOhlcvHistory } from "@/app/lib/prices";
+import { fetchDisplayHistory } from "@/app/lib/prices";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,9 +11,10 @@ export async function GET(req: NextRequest) {
 
   if (!symbol) return Response.json({ error: "symbol required" }, { status: 400 });
 
-  const ohlcv = await fetchOhlcvHistory(symbol.toUpperCase(), bars);
-  if (!ohlcv) return Response.json({ error: "no data" }, { status: 404 });
+  const history = await fetchDisplayHistory(symbol.toUpperCase(), bars);
+  if (!history) return Response.json({ error: "no data" }, { status: 404 });
 
+  const ohlcv = history.bars;
   // Compute 20-period SMA
   const sma: { time: string; value: number }[] = [];
   for (let i = 19; i < ohlcv.length; i++) {
@@ -30,5 +31,5 @@ export async function GET(req: NextRequest) {
     volume: b.volume,
   }));
 
-  return Response.json({ symbol: symbol.toUpperCase(), candles, sma });
+  return Response.json({ symbol: symbol.toUpperCase(), currency: history.currency, candles, sma });
 }
