@@ -175,6 +175,68 @@ Phase 0 (recover the live source) is **done**. Phases 1–5 (lock writes, settin
 
 ---
 
+## What the original author said about the swarm
+
+Checked against `app/lib/mirofish.ts`, `app/lib/macroBias.ts`, `app/lib/socialBias.ts`, and the scan cron. Calls below were made from this environment on 25 September 2026. The live database was not queried.
+
+### 1. Is the description accurate?
+
+Mostly, for the scanner. A few parts are looser than the code.
+
+What matches `runSwarm()`:
+
+- It loops 1000 virtual agents. The mix is momentum 30%, contrarian 20%, macro 25%, sentiment 25% (`ARCHETYPE_MIX`). Rounding those shares lands on 300, 200, 250, and 250.
+- Each agent adds `jitter()`, which is `Math.random()` in a range of ±0.2, then turns that into a bullish and a bearish probability with a sigmoid, then rolls `Math.random()` again to pick bullish, bearish, or neutral.
+- The scanner (`app/api/cron/scan/route.ts`) passes a live price from `fetchPrice()`, the percent move since the last stored price, a macro number, and a social number.
+- Macro is five FRED series, clamped to −1..+1: yield curve `T10Y2Y`, Chicago Fed financial conditions `NFCI`, VIX as series `VIXCLS` (not a series named `VIX`), EUR/USD `DEXUSEU`, and 10-year breakeven inflation `T10YIE`. If `FRED_API_KEY` is missing, each fetch returns null and `getMacroBias()` returns 0. It does not throw.
+- Social is StockTwits messages for that symbol. The code intends to use a Bullish/Bearish tag, and otherwise count keywords. An HTTP error, a thrown request, or an empty message list becomes 0.
+
+What the description skips:
+
+- Momentum and contrarian agents never read FRED or StockTwits. They only see the price move, plus jitter. Macro agents are `0.6 * macro + 0.2 * trend + jitter`. Sentiment agents are `0.6 * social + 0.3 * trend + jitter`. Half the swarm ignores the two outside feeds entirely.
+- The sigmoid outputs are multiplied by 0.85, so even a strong bias leaves about 15% of the roll as neutral before the 55% vote hurdle that decides the signal direction.
+- Jarvis’s “run the swarm” tool does call `fetchPrice()`, but it then passes `pctChange: 0` (`app/api/jarvis/tools.ts`). That run is macro, social, and randomness, with no price move.
+- StockTwits tags are not where the code looks. See below. The keyword list is the path that actually scores messages.
+- The Kronos cron (`app/api/cron/swarm/route.ts`) is a different generator. It does not call `runSwarm()`.
+
+### 2. Do FRED and StockTwits return data today?
+
+**StockTwits: yes for US symbols and BTC, from this machine, with no API key.** At 03:41 UTC the public stream returned HTTP 200 and 30 messages for `NVDA`, `TSLA`, `AAPL`, `BTC`, `BTC.X`, and `ETH.X`. `DRO.AX` returned HTTP 404 “Symbol not found”, so an ASX symbol falls through to social bias 0.
+
+The messages do carry sentiment, but on `entities.sentiment.basic` (`"Bullish"` / `"Bearish"`). The top-level `sentiment` field the code checks was null on every message sampled. Those tags are ignored. Every message is scored with the keyword list (`moon`, `buy`, `dump`, and so on). A normal sentence with no keyword counts as neutral. So the social number is a keyword skim, not StockTwits’ own tags. The public API is not locked from this environment.
+
+The live site’s `GET /api/debug/macro` at 03:41 UTC returned `social_bias: 0.1666…` and `degraded: false`. That route averages StockTwits for TSLA and NVDA only. A non-zero value means production did get messages and the keyword score was not zero. It does not mean the tags were used.
+
+**FRED: the series are still published. This app’s call is not showing a live reading.**
+
+- No `FRED_API_KEY` is set in this environment. A request to `api.stlouisfed.org` without a key returned HTTP 400, “Variable api_key is not set.”
+- The same five series are updating on the public FRED CSV (no key): VIXCLS through 22 Sep 2026 (14.21), T10Y2Y through 24 Sep (0.31), NFCI through 18 Sep (−0.555), DEXUSEU through 18 Sep (1.1464), T10YIE through 24 Sep (2.33).
+- Production `GET /api/debug/macro` returned `macro_bias: 0` and `degraded: false`. `getMacroBias()` returns exactly 0, and does not throw, when the key is missing or every series comes back empty. The dashboard then has nothing to distinguish “the economy is neutral” from “FRED was not read.”
+- Even with a key, the request uses `limit=1` and does not set `sort_order`. FRED’s default is `asc`, so `limit=1` is the oldest observation in the series, not the latest. A configured key would still not be “today’s” macro.
+
+**If both outside numbers are 0, the scanner swarm is the price move plus randomness.** Momentum and contrarian were already only that. Macro agents collapse to `0.2 * trend + jitter`, sentiment agents to `0.3 * trend + jitter`. Nothing in the signal text says so. The failure is also easy to miss in the cron: `getMacroBias()` and `getSocialBias()` return 0 instead of throwing, so the `catch` blocks that force a 0 never run.
+
+### 3. Does the UI say when an input fell back to 0?
+
+**No.**
+
+- The dashboard chips (`BiasChip` in `app/page.tsx`) print `+0%` in the same style as a real neutral reading. They do not read the `degraded` field, and that field is false anyway when the functions return 0 on purpose.
+- `BiasIndicator` (`app/components/BiasIndicator.tsx`) can show “Neutral” for 0 and is not mounted on any page.
+- The signal sentence (`buildSummary`) mentions the move and the conviction. It does not mention missing FRED or StockTwits data.
+- Jarvis returns the swarm result and not a flag that an input was unavailable.
+
+### Dormant since April, one logged trade
+
+**The code does not say this, and it does not match the database snapshot already recorded.** This pass did not query Supabase. The 25 September review of the live database counted 155 signals and 53 trades (47 closed, 6 open), with the newest signal on 24 July 2026. That is a quiet scanner since late July, not a bot dormant since April with a single trade. There is no other trade log in the repo that contains one trade.
+
+### Later change, not in this pull request
+
+Label the dial as a **simulated score**, for example “Simulated vote, not 1000 analysts” or “Conviction score (price, plus randomness if macro and social are missing).” Keep the stored 0–100 next to it so a conviction of 72 is not shown as “810 of 1000 agents.”
+
+When macro or social is the fallback 0, show **“input unavailable”** on that chip instead of `+0%`. The API should say which feed failed (no key, HTTP error, empty messages, symbol not on StockTwits). A real measured zero can stay `+0%`, with a different label, so a calm reading is not confused with a dead feed.
+
+---
+
 ## Left for later pull requests
 
 Do not treat this list as done.
@@ -184,6 +246,7 @@ Do not treat this list as done.
 - Server-side price failures on the screener (the fetch moved server-side; empty cells are a separate bug if Yahoo still refuses).
 - P&L as a sum of percents, currency symbols, stale high-conviction signals, and neutral approvals opening paper trades.
 - A visible disclaimer.
+- An honest label on the conviction dial (“simulated vote”, not “N of 1000 agents”), and an “input unavailable” chip when FRED or StockTwits fell back to 0. Do not show that fallback as `+0%`.
 - Cron routes that fail open when `CRON_SECRET` is empty, and the `?secret=` query parameter.
 - Auth on Jarvis reads, `/api/debug/macro`, and the Telegram webhook.
 
