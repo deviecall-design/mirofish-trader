@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     include: [
       "app/lib/risk.test.ts",
+      "app/lib/orderAuth.test.ts",
       "app/lib/brokers/**/*.test.ts",
       "app/lib/pnl.test.ts",
       "app/lib/freshness.test.ts",

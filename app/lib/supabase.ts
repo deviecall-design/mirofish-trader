@@ -2,7 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 // Created on first use, not at import. Preview builds do not have the
 // NEXT_PUBLIC_ Supabase vars, and throwing here used to fail `next build`
-// while route modules such as /api/cron/swarm were loaded.
+// while route modules such as /api/cron/swarm were loaded ("Collecting page data").
 let cached: SupabaseClient | null = null;
 
 export function supabase(): SupabaseClient {

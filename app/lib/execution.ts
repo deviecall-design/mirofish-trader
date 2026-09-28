@@ -7,6 +7,8 @@ import { binanceBroker } from "./brokers/binance";
 import type { PlacedOrder } from "./brokers/types";
 import { checkOrder, riskConfigFromEnv } from "./risk";
 import { TAKE_PROFIT_PCT, STOP_LOSS_PCT } from "./constants";
+import { liveTradingEnabled } from "./brokers/binance";
+import { assertBrokerOrderAuthorized } from "./orderAuth";
 
 export class RiskRejectionError extends Error {}
 
@@ -22,7 +24,8 @@ export interface ExecutionResult {
 
 export function executionMode(): TradeMode {
   if (process.env.EXECUTION_ENABLED !== "true") return "paper";
-  return process.env.BINANCE_TESTNET === "false" ? "live" : "testnet";
+  // Testnet stays the default. Live requires the explicit opt-in flag.
+  return liveTradingEnabled() ? "live" : "testnet";
 }
 
 // Realized non-paper PnL today, in USD. trades.pnl is a percentage; each real
@@ -98,6 +101,11 @@ export async function executeEntry(
     // mask the refusal behind a fake fill.
     throw new RiskRejectionError(`order refused: ${verdict.reason}`);
   }
+
+  // Paper approvals above do not reach here. Testnet and live orders both
+  // require an authenticated caller; an open Approve button or Jarvis chat
+  // must not be enough.
+  await assertBrokerOrderAuthorized();
 
   const entryOrder = await broker.placeMarketOrder(symbol, "BUY", cfg.maxPositionUsd);
   const entryPrice = entryOrder.fillPrice ?? marketPrice;

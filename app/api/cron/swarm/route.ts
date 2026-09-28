@@ -107,9 +107,24 @@ function heuristicSentiment(expectedReturn: number): SentimentReading {
 // Spawns `python -m mirofish.forecast_cli`, feeding OHLCV bars via stdin and
 // reading the forecast summary back as JSON from stdout. Kronos is a
 // torch/HuggingFace model — it can't run in the Node process directly.
+const FORECAST_EXEC_OPTS = {
+  timeout: KRONOS_FORECAST_TIMEOUT_MS,
+  maxBuffer: 10 * 1024 * 1024,
+} as const;
+
+// A non-literal first argument makes Turbopack trace the whole repository
+// into this route (the warning names next.config.ts). The default stays a
+// string literal. The env override is marked ignored so it does not.
+function spawnForecast(args: string[], onExit: (err: Error | null, stdout: string, stderr: string) => void) {
+  const override = process.env.KRONOS_PYTHON_BIN;
+  if (override) {
+    return execFile(/* turbopackIgnore: true */ override, args, FORECAST_EXEC_OPTS, onExit);
+  }
+  return execFile("python3", args, FORECAST_EXEC_OPTS, onExit);
+}
+
 function runForecastCli(symbol: string, bars: OhlcvBar[]): Promise<ForecastSummary> {
   return new Promise((resolve, reject) => {
-    const bin = process.env.KRONOS_PYTHON_BIN || "python3";
     const args = [
       "-m",
       "mirofish.forecast_cli",
@@ -123,11 +138,7 @@ function runForecastCli(symbol: string, bars: OhlcvBar[]): Promise<ForecastSumma
     if (process.env.KRONOS_MOCK === "true") args.push("--mock");
     if (process.env.KRONOS_REPO_PATH) args.push("--kronos-repo", process.env.KRONOS_REPO_PATH);
 
-    const child = execFile(
-      bin,
-      args,
-      { timeout: KRONOS_FORECAST_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout, stderr) => {
+    const child = spawnForecast(args, (err, stdout, stderr) => {
         if (err) {
           reject(new Error(`forecast_cli failed for ${symbol}: ${stderr || err.message}`));
           return;
