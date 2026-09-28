@@ -3,12 +3,14 @@ import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ResponsiveContainer, LineChart, Line } from "recharts";
+import { formatCloseAsOf, formatMarketCap, formatMoney, PRICE_UNAVAILABLE } from "@/app/lib/currency";
 
 const StockChart = dynamic(() => import("@/app/components/StockChart"), { ssr: false });
 
 interface Stock {
-  symbol: string; name: string; price: number | null;
+  symbol: string; name: string; price: number | null; currency: string;
   changePercent: number | null; marketCapB: number | null; sparkline: number[];
+  asOf?: string | null;
 }
 interface Sector { id: string; label: string; }
 interface ChartData { candles: object[]; sma: object[]; }
@@ -25,12 +27,14 @@ function Sparkline({ data, pos }: { data: number[]; pos: boolean }) {
   );
 }
 
-function fmt(n: number | null, d = 2) { return n == null ? "—" : n.toLocaleString("en-AU", { minimumFractionDigits: d, maximumFractionDigits: d }); }
-function fmtCap(n: number | null) {
-  if (n == null) return "—";
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}T`;
-  if (n >= 1) return `$${n.toFixed(1)}B`;
-  return `$${(n * 1000).toFixed(0)}M`;
+function priceLabel(stock: { price: number | null; currency?: string }) {
+  if (stock.price == null) return PRICE_UNAVAILABLE;
+  return formatMoney(stock.price, stock.currency || "USD");
+}
+
+function CloseNote({ asOf }: { asOf?: string | null }) {
+  if (!asOf) return null;
+  return <span className="block text-[10px] leading-tight text-white/40">{formatCloseAsOf(asOf)}</span>;
 }
 
 export default function ScreenerPage() {
@@ -126,11 +130,14 @@ export default function ScreenerPage() {
                     className={`border-b border-white/5 cursor-pointer transition-colors ${isSel?"bg-[#f0b429]/5 border-l-2 border-l-[#f0b429]":"hover:bg-white/3"}`}>
                     <td className="px-6 py-3 font-bold text-white">{s.symbol}</td>
                     <td className="py-3 text-white/40 hidden md:table-cell text-xs">{s.name}</td>
-                    <td className="py-3 text-right text-white">${fmt(s.price, s.price && s.price < 10 ? 4 : 2)}</td>
-                    <td className={`py-3 text-right font-bold ${pos?"text-green-400":"text-red-400"}`}>
+                    <td className={`py-3 text-right ${s.price == null ? "text-white/40 text-xs" : "text-white"}`}>
+                      {priceLabel(s)}
+                      {s.price != null && <CloseNote asOf={s.asOf} />}
+                    </td>
+                    <td className={`py-3 text-right font-bold ${s.changePercent == null ? "text-white/30" : pos ? "text-green-400" : "text-red-400"}`}>
                       {s.changePercent != null ? `${pos?"+":""}${s.changePercent.toFixed(2)}%` : "—"}
                     </td>
-                    <td className="py-3 text-right text-white/40 text-xs hidden lg:table-cell">{fmtCap(s.marketCapB)}</td>
+                    <td className="py-3 text-right text-white/40 text-xs hidden lg:table-cell">{formatMarketCap(s.marketCapB, s.currency || "USD")}</td>
                     <td className="py-3 flex justify-center"><Sparkline data={s.sparkline} pos={pos} /></td>
                     <td className="py-3 pr-4 text-center">
                       <button onClick={e=>{e.stopPropagation();openDetail(s);}} className="text-xs px-2 py-1 border border-white/20 text-white/40 rounded hover:border-[#f0b429]/50 hover:text-[#f0b429]">Chart</button>
@@ -155,7 +162,10 @@ export default function ScreenerPage() {
 
             {/* Price header */}
             <div className="flex items-end gap-3 mb-4">
-              <span className="text-3xl font-bold text-white">${fmt(selected.price, selected.price && selected.price < 10 ? 4 : 2)}</span>
+              <span className={`text-3xl font-bold ${selected.price == null ? "text-white/40 text-lg" : "text-white"}`}>
+                {priceLabel(selected)}
+                {selected.price != null && <CloseNote asOf={selected.asOf} />}
+              </span>
               <span className={`text-sm font-bold mb-1 ${(selected.changePercent??0)>=0?"text-green-400":"text-red-400"}`}>
                 {selected.changePercent != null ? `${(selected.changePercent>=0)?"+":""}${selected.changePercent.toFixed(2)}%` : ""}
               </span>

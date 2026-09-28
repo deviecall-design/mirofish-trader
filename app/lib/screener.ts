@@ -1,21 +1,26 @@
-// Stock screener — curated sector lists + Yahoo Finance / Binance live data
+// Stock screener — curated sector lists. Live quotes are fetched server-side
+// in app/lib/prices.ts (the browser cannot call Yahoo because of CORS).
+
+import { fetchMarketQuotes } from "./prices";
 
 export interface ScreenerStock {
   symbol: string;
   name: string;
   price: number | null;
+  /** Provider quote currency (USD, AUD, ZAc, GBp, …). Null price still carries a guess. */
+  currency: string;
   changePercent: number | null;
-  marketCapB: number | null; // billions
+  marketCapB: number | null; // billions of the listing currency
   sparkline: number[]; // last 7 daily closes, oldest first
   sector: string;
+  /** YYYY-MM-DD when price is a daily close rather than a live quote. */
+  asOf: string | null;
 }
 
 export interface SectorMeta {
   id: string;
   label: string;
 }
-
-const CRYPTO_SYMBOLS = new Set(["BTC", "ETH"]);
 
 // ─── Curated sector definitions ───────────────────────────────────────────────
 
@@ -121,83 +126,25 @@ export function getAllSectors(): SectorMeta[] {
   return Object.entries(SECTORS).map(([id, { label }]) => ({ id, label }));
 }
 
-// ─── Data fetchers ─────────────────────────────────────────────────────────────
-
-async function fetchYahooDetail(symbol: string): Promise<{
-  price: number | null;
-  changePercent: number | null;
-  marketCapB: number | null;
-  sparkline: number[];
-}> {
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-      },
-      next: { revalidate: 60 },
-    });
-    if (!res.ok) return { price: null, changePercent: null, marketCapB: null, sparkline: [] };
-    const data = await res.json();
-    const result = data?.chart?.result?.[0];
-    const meta = result?.meta;
-    const closes: unknown[] = result?.indicators?.quote?.[0]?.close ?? [];
-    const validCloses = closes.filter((c): c is number => typeof c === "number");
-    return {
-      price: typeof meta?.regularMarketPrice === "number" ? meta.regularMarketPrice : null,
-      changePercent: typeof meta?.regularMarketChangePercent === "number" ? meta.regularMarketChangePercent : null,
-      marketCapB: typeof meta?.marketCap === "number" ? meta.marketCap / 1e9 : null,
-      sparkline: validCloses.slice(-7),
-    };
-  } catch {
-    return { price: null, changePercent: null, marketCapB: null, sparkline: [] };
-  }
-}
-
-async function fetchBinanceDetail(symbol: string): Promise<{
-  price: number | null;
-  changePercent: number | null;
-  marketCapB: null;
-  sparkline: number[];
-}> {
-  const pairs: Record<string, string> = { BTC: "BTCUSDT", ETH: "ETHUSDT" };
-  const pair = pairs[symbol.toUpperCase()];
-  if (!pair) return { price: null, changePercent: null, marketCapB: null, sparkline: [] };
-  try {
-    const [tickerRes, klinesRes] = await Promise.all([
-      fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`, { next: { revalidate: 60 } }),
-      fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1d&limit=7`, { next: { revalidate: 60 } }),
-    ]);
-    if (!tickerRes.ok) return { price: null, changePercent: null, marketCapB: null, sparkline: [] };
-    const ticker = await tickerRes.json() as { lastPrice: string; priceChangePercent: string };
-    let sparkline: number[] = [];
-    if (klinesRes.ok) {
-      const klines = await klinesRes.json() as string[][];
-      sparkline = klines.map((k) => parseFloat(k[4]));
-    }
-    return {
-      price: parseFloat(ticker.lastPrice),
-      changePercent: parseFloat(ticker.priceChangePercent),
-      marketCapB: null,
-      sparkline,
-    };
-  } catch {
-    return { price: null, changePercent: null, marketCapB: null, sparkline: [] };
-  }
-}
-
 export async function fetchScreenerData(sector: string): Promise<ScreenerStock[]> {
   const sectorData = SECTORS[sector];
   if (!sectorData) return [];
-  const results = await Promise.all(
-    sectorData.stocks.map(async ({ symbol, name }) => {
-      const isCrypto = CRYPTO_SYMBOLS.has(symbol.toUpperCase());
-      const detail = isCrypto
-        ? await fetchBinanceDetail(symbol)
-        : await fetchYahooDetail(symbol);
-      return { symbol, name, sector: sectorData.label, ...detail };
-    })
+  const quotes = await fetchMarketQuotes(
+    sectorData.stocks.map((stock) => stock.symbol),
+    { sparkline: true }
   );
-  return results;
+  return sectorData.stocks.map(({ symbol, name }, index) => {
+    const detail = quotes[index];
+    return {
+      symbol,
+      name,
+      sector: sectorData.label,
+      price: detail.price,
+      currency: detail.currency,
+      changePercent: detail.changePercent,
+      marketCapB: detail.marketCapB,
+      sparkline: detail.sparkline,
+      asOf: detail.asOf,
+    };
+  });
 }

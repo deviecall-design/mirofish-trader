@@ -5,6 +5,7 @@ import ConsensusStrip from "./components/ConsensusStrip";
 import ReactorGauge from "./components/ReactorGauge";
 import EquityCurve from "./components/EquityCurve";
 import JarvisChat from "./components/JarvisChat";
+import { formatMoney, quoteCurrencyForSymbol } from "./lib/currency";
 import { supabase, SignalRow, TradeRow } from "./lib/supabase";
 import { SignalActions } from "./signals/SignalActions";
 import { performanceFromTrades } from "./lib/pnl";
@@ -300,7 +301,9 @@ export default function Cockpit() {
                     <span className="num text-sm font-bold truncate">{s.symbol}</span>
                   </span>
                   <span className="num text-xs text-[var(--muted)] text-right">
-                    {s.price != null ? `$${Number(s.price).toFixed(2)}` : "—"}
+                    {s.price != null
+                      ? formatMoney(Number(s.price), quoteCurrencyForSymbol(s.symbol))
+                      : "—"}
                     <span className="block">
                       {formatSignalAge(s.created_at)}
                       {isStaleSignal(s.created_at) ? " · stale" : ""}
@@ -419,7 +422,7 @@ export default function Cockpit() {
                     </span>
                     {topSignal.price != null && (
                       <span className="num text-sm text-[var(--muted)]">
-                        ${Number(topSignal.price).toFixed(2)}
+                        {formatMoney(Number(topSignal.price), quoteCurrencyForSymbol(topSignal.symbol))}
                       </span>
                     )}
                   </div>

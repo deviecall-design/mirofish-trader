@@ -1,11 +1,12 @@
 import { Card } from "../components/Card";
+import { formatMoney, quoteCurrencyForSymbol } from "../lib/currency";
 import { supabase, TradeRow } from "../lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-function formatUsd(n: number | null | undefined) {
+function formatPrice(symbol: string, n: number | null | undefined) {
   if (n == null) return "—";
-  return Number(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  return formatMoney(Number(n), quoteCurrencyForSymbol(symbol));
 }
 
 function formatPct(n: number | null | undefined) {
@@ -70,8 +71,8 @@ export default async function JournalPage() {
                       <td className="py-2 pr-4 font-mono">{t.symbol}</td>
                       <td className="pr-4 capitalize">{t.direction}</td>
                       <td className="pr-4 capitalize">{t.status}</td>
-                      <td className="pr-4 font-mono">{formatUsd(t.entry_price)}</td>
-                      <td className="pr-4 font-mono">{formatUsd(t.exit_price)}</td>
+                      <td className="pr-4 font-mono">{formatPrice(t.symbol, t.entry_price)}</td>
+                      <td className="pr-4 font-mono">{formatPrice(t.symbol, t.exit_price)}</td>
                       <td className={`pr-4 font-mono ${pnlClass}`}>{formatPct(pnl)}</td>
                       <td className="pr-4 text-[var(--muted)]">
                         {new Date(t.opened_at).toLocaleString()}

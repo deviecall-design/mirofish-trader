@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { supabase, TradeRow, WatchlistRow } from "@/app/lib/supabase";
+import { formatMoney, quoteCurrencyForSymbol } from "@/app/lib/currency";
 import { fetchPrice } from "@/app/lib/prices";
 import { getLastPrice } from "@/app/lib/lastPrices";
 import { runSwarm } from "@/app/lib/mirofish";
@@ -126,7 +127,7 @@ async function syncRealTrade(trade: TradeRow, result: ScanResult) {
   const emoji = pnl >= 0 ? "🟢" : "🔴";
   await notify(
     `${emoji} <b>${trade.symbol}</b> closed on exchange (${reason}) ` +
-      `at $${exitPrice.toFixed(2)} — P&amp;L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}% [${trade.mode}]`
+      `at ${formatMoney(exitPrice, quoteCurrencyForSymbol(trade.symbol))} — P&amp;L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}% [${trade.mode}]`
   );
 }
 
@@ -177,7 +178,7 @@ async function runScan(): Promise<ScanResult> {
     const emoji = close === "tp" ? "🟢" : "🔴";
     await notify(
       `${emoji} <b>${trade.symbol}</b> closed (${close === "tp" ? "TP" : "SL"}) ` +
-        `at $${quote.price.toFixed(2)} — P&amp;L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%`
+        `at ${formatMoney(quote.price, quote.currency)} — P&amp;L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%`
     );
   }
 
@@ -200,7 +201,7 @@ async function runScan(): Promise<ScanResult> {
         symbol: row.symbol,
         direction: "neutral",
         conviction: 0,
-        summary: `${row.symbol} baseline observed at $${quote.price.toFixed(2)}.`,
+        summary: `${row.symbol} baseline observed at ${formatMoney(quote.price, quote.currency)}.`,
         status: "ignored",
         price: quote.price,
       });

@@ -11,6 +11,7 @@ export function WatchlistEditor() {
   const [symbol, setSymbol] = useState("");
   const [theme, setTheme] = useState("AI/Tech");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   return (
     <Card title="Add symbol">
@@ -19,14 +20,20 @@ export function WatchlistEditor() {
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
+          setNotice(null);
           if (!symbol.trim()) return;
           startTransition(async () => {
-            const res = await addSymbol(symbol.trim().toUpperCase(), theme);
+            const res = await addSymbol(symbol.trim(), theme);
             if (!res.ok) {
               setError(res.reason ?? "failed");
               return;
             }
             setSymbol("");
+            setNotice(
+              res.resolvedFrom
+                ? `Saved ${res.symbol} (resolved from ${res.resolvedFrom}).`
+                : null
+            );
             router.refresh();
           });
         }}
@@ -34,7 +41,7 @@ export function WatchlistEditor() {
         <input
           value={symbol}
           onChange={(e) => setSymbol(e.target.value)}
-          placeholder="Symbol e.g. AAPL"
+          placeholder="Ticker e.g. NVDA or DRO.AX"
           className="px-3 py-1.5 rounded bg-[var(--panel-2)] border border-[var(--border)] text-sm"
         />
         <select
@@ -55,6 +62,7 @@ export function WatchlistEditor() {
           Add
         </button>
         {error && <span className="text-xs text-[var(--bearish)] self-center">{error}</span>}
+        {notice && <span className="text-xs text-[var(--bullish)] self-center">{notice}</span>}
       </form>
     </Card>
   );
