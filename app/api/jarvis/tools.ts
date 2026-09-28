@@ -183,7 +183,7 @@ export async function runJarvisTool(
           note:
             executionMode() === "paper"
               ? "Paper trade — no real order."
-              : `This will place a REAL ${executionMode()} order on Binance with exchange-side TP/SL.`,
+              : `This will place a REAL ${executionMode()} order on Binance with exchange-side TP/SL. The request must send Authorization: Bearer TRADING_API_SECRET or the order is refused.`,
         };
       }
 

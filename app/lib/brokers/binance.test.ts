@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { sign, toPair, baseUrl, roundPrice, roundQty } from "./binance";
+import { describe, it, expect, afterEach } from "vitest";
+import { sign, toPair, baseUrl, liveTradingEnabled, roundPrice, roundQty } from "./binance";
 
 describe("sign", () => {
   it("produces a stable HMAC-SHA256 hex signature (cross-verified with openssl)", () => {
@@ -27,17 +27,39 @@ describe("toPair", () => {
 });
 
 describe("baseUrl", () => {
+  afterEach(() => {
+    delete process.env.BINANCE_TESTNET;
+    delete process.env.LIVE_TRADING_ENABLED;
+  });
+
   it("defaults to testnet", () => {
     delete process.env.BINANCE_TESTNET;
+    delete process.env.LIVE_TRADING_ENABLED;
+    expect(liveTradingEnabled()).toBe(false);
     expect(baseUrl()).toBe("https://testnet.binance.vision");
     process.env.BINANCE_TESTNET = "true";
     expect(baseUrl()).toBe("https://testnet.binance.vision");
   });
 
-  it("uses production only when testnet is explicitly disabled", () => {
+  it("stays on testnet when BINANCE_TESTNET=false but live trading is not opted in", () => {
     process.env.BINANCE_TESTNET = "false";
+    delete process.env.LIVE_TRADING_ENABLED;
+    expect(liveTradingEnabled()).toBe(false);
+    expect(baseUrl()).toBe("https://testnet.binance.vision");
+  });
+
+  it("stays on testnet when the live flag is set but testnet is still on", () => {
+    process.env.LIVE_TRADING_ENABLED = "true";
+    process.env.BINANCE_TESTNET = "true";
+    expect(liveTradingEnabled()).toBe(false);
+    expect(baseUrl()).toBe("https://testnet.binance.vision");
+  });
+
+  it("uses production only when live trading is opted in and testnet is explicitly off", () => {
+    process.env.LIVE_TRADING_ENABLED = "true";
+    process.env.BINANCE_TESTNET = "false";
+    expect(liveTradingEnabled()).toBe(true);
     expect(baseUrl()).toBe("https://api.binance.com");
-    delete process.env.BINANCE_TESTNET;
   });
 });
 
