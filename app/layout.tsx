@@ -3,6 +3,8 @@ import { Chakra_Petch, Instrument_Sans, JetBrains_Mono } from "next/font/google"
 import Link from "next/link";
 import "./globals.css";
 import JarvisPanel from "./components/JarvisPanel";
+import JarvisStatus from "./components/JarvisStatus";
+import ScanBanner from "./components/ScanBanner";
 import SwarmField from "./components/SwarmField";
 import AgentWire from "./components/AgentWire";
 import { executionMode } from "./lib/execution";
@@ -23,7 +25,7 @@ const jetbrains = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "MiroFish Trader",
-  description: "A thousand AI agents working for you — swarm-driven trading with Jarvis",
+  description: "Paper-trading dashboard. Signals come from a Monte Carlo model, not a live swarm of agents.",
 };
 
 const NAV = [
@@ -66,9 +68,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="min-h-screen flex flex-col" data-mode={mode}>
         <SwarmField />
+        <p className="sr-only">Decorative background. Not a live swarm of trading agents.</p>
         <div className="relative z-10 flex min-h-screen flex-col">
           <header className="border-b border-[var(--border)] bg-[var(--panel)]/80 backdrop-blur-sm">
-            <div className="mx-auto max-w-6xl px-6 py-4">
+            <div className="mx-auto max-w-[1560px] px-5 py-4">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <Link href="/" className="flex items-center gap-3">
                   <span aria-hidden>🐟</span>
@@ -105,18 +108,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </nav>
               </div>
               <div className="mt-3 flex items-center gap-2 flex-wrap">
-                <StatusModule label="Swarm" value="1000 agents" tone="ok" />
+                <StatusModule label="Model" value="simulated, 1,000 runs" tone="off" />
                 <StatusModule
                   label="Execution"
                   value={mode === "live" ? "armed" : mode}
                   tone={mode === "live" ? "hot" : mode === "testnet" ? "ok" : "off"}
                 />
-                <StatusModule
-                  label="Jarvis"
-                  value={process.env.ANTHROPIC_API_KEY ? "active" : "offline"}
-                  tone={process.env.ANTHROPIC_API_KEY ? "ok" : "off"}
-                />
+                <JarvisStatus />
               </div>
+              <ScanBanner />
               <div className="mt-2">
                 <AgentWire />
               </div>

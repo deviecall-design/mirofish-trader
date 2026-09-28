@@ -7,8 +7,9 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { supabase, type SignalRow, type TradeRow } from "@/app/lib/supabase";
 import { fetchPrice } from "@/app/lib/prices";
 import { runSwarm } from "@/app/lib/mirofish";
-import { getMacroBias } from "@/app/lib/macroBias";
-import { getSocialBias } from "@/app/lib/socialBias";
+import { getMacroBiasReport } from "@/app/lib/macroBias";
+import { getSocialBiasReport } from "@/app/lib/socialBias";
+import { performanceFromTrades } from "@/app/lib/pnl";
 import { approveSignal, ignoreSignal } from "@/app/signals/actions";
 import { executionMode } from "@/app/lib/execution";
 
@@ -39,7 +40,7 @@ export const JARVIS_TOOLS: Anthropic.Tool[] = [
   {
     name: "run_swarm",
     description:
-      "Run a 1000-agent MiroFish swarm simulation on a symbol right now and return direction, conviction and archetype votes. Call this when the user asks for sentiment or 'what does the swarm think'.",
+      "Run the Monte Carlo model (1,000 virtual votes with random jitter, not live agents) on a symbol and return direction, conviction and archetype votes. Call this when the user asks for sentiment or 'what does the swarm think'. Say that it is a simulation.",
     input_schema: {
       type: "object",
       properties: { symbol: { type: "string", description: "Ticker symbol" } },
@@ -50,7 +51,7 @@ export const JARVIS_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_performance",
     description:
-      "Get overall performance: win rate, average return, total closed trades, open count.",
+      "Get paper-account performance: win rate, average trade, size-weighted compounded account return, and max drawdown. The account return is not the sum of trade percentages.",
     input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -125,37 +126,54 @@ export async function runJarvisTool(
       const symbol = String(input.symbol ?? "").toUpperCase();
       const quote = await fetchPrice(symbol);
       if (!quote) return { error: `no price available for ${symbol}` };
-      const [macroBias, socialBias] = await Promise.all([
-        getMacroBias().catch(() => 0),
-        getSocialBias(symbol).catch(() => 0),
+      const [macro, social] = await Promise.all([
+        getMacroBiasReport().catch(() => ({
+          value: 0,
+          available: false,
+          detail: "macro feed failed",
+        })),
+        getSocialBiasReport(symbol).catch(() => ({
+          value: 0,
+          available: false,
+          detail: "social feed failed",
+        })),
       ]);
       const swarm = runSwarm({
         symbol,
         price: quote.price,
         pctChange: 0,
-        macroBias,
-        socialBias,
+        macroBias: macro.value,
+        socialBias: social.value,
       });
-      return { price: quote.price, ...swarm };
+      return {
+        price: quote.price,
+        simulated: true,
+        runs: 1000,
+        inputs: { macro, social },
+        ...swarm,
+      };
     }
 
     case "get_performance": {
       const { data: closed } = await sb
         .from("trades")
-        .select("pnl")
+        .select("pnl,entry_price,quantity,opened_at,closed_at,status")
         .eq("status", "closed");
       const { count: openCount } = await sb
         .from("trades")
         .select("id", { count: "exact", head: true })
         .eq("status", "open");
-      const trades = (closed ?? []) as Pick<TradeRow, "pnl">[];
-      const wins = trades.filter((t) => Number(t.pnl) > 0).length;
-      const totalPnl = trades.reduce((s, t) => s + Number(t.pnl ?? 0), 0);
+      const perf = performanceFromTrades((closed ?? []) as TradeRow[]);
       return {
-        closedTrades: trades.length,
+        closedTrades: perf.closedCount,
         openTrades: openCount ?? 0,
-        winRate: trades.length ? Number(((wins / trades.length) * 100).toFixed(1)) : null,
-        avgReturnPct: trades.length ? Number((totalPnl / trades.length).toFixed(2)) : null,
+        winRate: perf.closedCount ? Number(perf.winRatePct.toFixed(1)) : null,
+        avgReturnPct: perf.closedCount
+          ? Number(perf.equalWeightAverageReturnPct.toFixed(2))
+          : null,
+        accountReturnPct: Number(perf.accountReturnPct.toFixed(2)),
+        maxDrawdownPct: Number(perf.maxDrawdownPct.toFixed(2)),
+        note: "accountReturnPct is size-weighted and compounded. It is not the sum of each trade's percent. avgReturnPct is the unweighted average of those percents.",
       };
     }
 
@@ -187,7 +205,8 @@ export async function runJarvisTool(
         };
       }
 
-      await approveSignal(signalId);
+      const approved = await approveSignal(signalId);
+      if (!approved.ok) return { approved: false, reason: approved.reason ?? "not approved" };
       return { approved: true, signal_id: signalId, mode: executionMode() };
     }
 

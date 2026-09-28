@@ -5,6 +5,7 @@ import { formatMoney, quoteCurrencyForSymbol } from "../lib/currency";
 import { supabase } from "../lib/supabase";
 import { sendTelegram } from "../lib/telegram";
 import { executeEntry, RiskRejectionError } from "../lib/execution";
+import { canOpenTrade } from "../lib/signalPolicy";
 import { OrderUnauthorizedError } from "../lib/orderAuth";
 
 export async function approveSignal(signalId: string) {
@@ -16,6 +17,9 @@ export async function approveSignal(signalId: string) {
     .single();
   if (error || !signal) throw new Error(error?.message ?? "signal not found");
   if (signal.status !== "pending") return { ok: false, reason: "not pending" };
+  if (!canOpenTrade(signal.direction)) {
+    return { ok: false, reason: "neutral signals do not open a trade" };
+  }
 
   // Execute first (real order or paper decision) — the signal only flips to
   // approved once we have a confirmed entry, so a broker/risk failure leaves

@@ -30,7 +30,8 @@ export default async function JournalPage() {
       <header>
         <h1 className="text-2xl font-semibold">Journal</h1>
         <p className="text-sm text-[var(--muted)] mt-1">
-          Every paper trade with entry, exit and P&amp;L. Newest first.
+          Each row is that trade&apos;s own percent change. The account figure on Performance
+          is size-weighted and is not the sum of these percentages.
         </p>
       </header>
 

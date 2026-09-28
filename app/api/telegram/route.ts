@@ -3,6 +3,7 @@ import { supabase } from "@/app/lib/supabase";
 import { formatMoney, quoteCurrencyForSymbol } from "@/app/lib/currency";
 import { fetchPrice } from "@/app/lib/prices";
 import { sendTelegram } from "@/app/lib/telegram";
+import { canOpenTrade } from "@/app/lib/signalPolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +63,14 @@ export async function POST(req: NextRequest) {
   if (command === "ignore") {
     await sb.from("signals").update({ status: "ignored" }).eq("id", signal.id);
     await sendTelegram(`🙈 Ignored <b>${symbol}</b>.`, chatId);
+    return Response.json({ ok: true });
+  }
+
+  if (!canOpenTrade(signal.direction)) {
+    await sendTelegram(
+      `<b>${symbol}</b> is neutral, so no trade was opened. Use <code>/ignore ${symbol}</code> to dismiss it.`,
+      chatId
+    );
     return Response.json({ ok: true });
   }
 

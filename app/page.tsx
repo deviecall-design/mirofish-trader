@@ -8,6 +8,8 @@ import JarvisChat from "./components/JarvisChat";
 import { formatMoney, quoteCurrencyForSymbol } from "./lib/currency";
 import { supabase, SignalRow, TradeRow } from "./lib/supabase";
 import { SignalActions } from "./signals/SignalActions";
+import { performanceFromTrades } from "./lib/pnl";
+import { formatSignalAge, isStaleSignal } from "./lib/freshness";
 
 // The cockpit. Not a document — an instrument panel. Left rail: watchlist
 // telemetry. Center stage: reactor gauge, P&L, equity curve, the machine's
@@ -16,8 +18,22 @@ import { SignalActions } from "./signals/SignalActions";
 interface DebugMacroResponse {
   degraded: boolean;
   macro_bias: number;
+  macro_available?: boolean;
+  macro_detail?: string | null;
   social_bias: number;
+  social_available?: boolean;
+  social_detail?: string | null;
   timestamp: string;
+}
+
+interface BiasView {
+  status: "loading" | "ready" | "error";
+  macro: number;
+  macroAvailable: boolean;
+  macroDetail: string | null;
+  social: number;
+  socialAvailable: boolean;
+  socialDetail: string | null;
 }
 
 function formatPct(n: number) {
@@ -35,16 +51,53 @@ function Clock() {
   return <span className="num text-xs text-[var(--muted)]">{now}</span>;
 }
 
-function BiasChip({ label, value }: { label: string; value: number }) {
+function BiasChip({
+  label,
+  value,
+  available,
+  detail,
+  pending,
+}: {
+  label: string;
+  value: number;
+  available: boolean;
+  detail: string | null;
+  pending?: boolean;
+}) {
+  if (pending) {
+    return (
+      <span className="hud-label flex items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2.5 py-1">
+        {label}
+        <span className="num text-[var(--muted)]">…</span>
+      </span>
+    );
+  }
+  if (!available) {
+    return (
+      <span
+        title={detail ?? "This input fell back to 0"}
+        className="hud-label flex items-center gap-1.5 rounded border border-[var(--bearish)]/40 bg-[var(--panel-2)] px-2.5 py-1"
+      >
+        {label}
+        <span className="text-[var(--bearish)]">unavailable</span>
+      </span>
+    );
+  }
   const tone =
     value > 0.05 ? "var(--bullish)" : value < -0.05 ? "var(--bearish)" : "var(--muted)";
   return (
-    <span className="hud-label flex items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2.5 py-1">
+    <span
+      title={detail ?? undefined}
+      className="hud-label flex items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--panel-2)] px-2.5 py-1"
+    >
       {label}
       <span className="num" style={{ color: tone }}>
         {value >= 0 ? "+" : ""}
         {Math.round(value * 100)}%
       </span>
+      {detail && /missing|unavailable|partial/i.test(detail) && (
+        <span className="text-[var(--accent)]">partial</span>
+      )}
     </span>
   );
 }
@@ -82,16 +135,23 @@ export default function Cockpit() {
   const [signals, setSignals] = useState<SignalRow[]>([]);
   const [trades, setTrades] = useState<TradeRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [macroBias, setMacroBias] = useState(0);
-  const [socialBias, setSocialBias] = useState(0);
-  const [bootMsg, setBootMsg] = useState("INITIALISING SWARM");
+  const [bias, setBias] = useState<BiasView>({
+    status: "loading",
+    macro: 0,
+    macroAvailable: false,
+    macroDetail: null,
+    social: 0,
+    socialAvailable: false,
+    socialDetail: null,
+  });
+  const [bootMsg, setBootMsg] = useState("LOADING PAPER BOOK");
 
   // Boot line
   useEffect(() => {
     const steps = [
-      [200, "LINKING 1000 AGENTS"],
-      [550, "SYNCING MARKET FEEDS"],
-      [900, "SWARM ONLINE"],
+      [200, "READING STORED SIGNALS"],
+      [550, "CHECKING MODEL INPUTS"],
+      [900, "READY"],
     ] as const;
     const timers = steps.map(([ms, msg]) => setTimeout(() => setBootMsg(msg), ms));
     return () => timers.forEach(clearTimeout);
@@ -134,10 +194,25 @@ export default function Cockpit() {
       try {
         const res = await fetch("/api/debug/macro");
         const data: DebugMacroResponse = await res.json();
-        setMacroBias(data.macro_bias);
-        setSocialBias(data.social_bias);
+        setBias({
+          status: "ready",
+          macro: data.macro_bias,
+          macroAvailable: data.macro_available ?? false,
+          macroDetail: data.macro_detail ?? null,
+          social: data.social_bias,
+          socialAvailable: data.social_available ?? false,
+          socialDetail: data.social_detail ?? null,
+        });
       } catch (err) {
         console.error("Failed to fetch bias:", err);
+        setBias((prev) => ({
+          ...prev,
+          status: "error",
+          macroAvailable: false,
+          socialAvailable: false,
+          macroDetail: "Could not read the macro feed",
+          socialDetail: "Could not read the social feed",
+        }));
       }
     };
     fetchBias();
@@ -147,20 +222,23 @@ export default function Cockpit() {
 
   const open = trades.filter((t) => t.status === "open");
   const closed = trades.filter((t) => t.status === "closed");
-  const wins = closed.filter((t) => (t.pnl ?? 0) > 0);
-  const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
-  const totalPnl = closed.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+  const account = useMemo(() => performanceFromTrades(closed), [closed]);
 
-  const topSignal = useMemo(
+  const freshPending = useMemo(
     () =>
-      [...signals]
-        .filter((s) => s.status === "pending")
-        .sort((a, b) => b.conviction - a.conviction)[0],
+      signals
+        .filter((s) => s.status === "pending" && !isStaleSignal(s.created_at))
+        .sort((a, b) => {
+          if (b.conviction !== a.conviction) return b.conviction - a.conviction;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        }),
     [signals]
   );
-  const consensusShare = topSignal
-    ? Math.round((0.33 + 0.67 * (topSignal.conviction / 100)) * 100)
-    : null;
+  const stalePending = useMemo(
+    () => signals.filter((s) => s.status === "pending" && isStaleSignal(s.created_at)),
+    [signals]
+  );
+  const topSignal = freshPending[0];
 
   // Watchlist telemetry: latest signal per symbol
   const telemetry = useMemo(() => {
@@ -169,10 +247,7 @@ export default function Cockpit() {
     return Array.from(seen.values()).slice(0, 12);
   }, [signals]);
 
-  const pendingSignals = useMemo(
-    () => signals.filter((s) => s.status === "pending").slice(0, 12),
-    [signals]
-  );
+  const pendingSignals = freshPending;
 
   if (loading) {
     return (
@@ -203,7 +278,7 @@ export default function Cockpit() {
       <div className="grid gap-4 lg:grid-cols-[230px_minmax(0,1fr)_360px]">
         {/* ── Left rail: watchlist telemetry ── */}
         <div className="space-y-4 lg:max-h-[calc(100vh-190px)] lg:overflow-y-auto">
-          <Panel title="Telemetry" delay={80} right={<Clock />}>
+          <Panel title="Last stored price" delay={80} right={<Clock />}>
             <ul className="space-y-1">
               {telemetry.map((s) => (
                 <li
@@ -225,10 +300,14 @@ export default function Cockpit() {
                     />
                     <span className="num text-sm font-bold truncate">{s.symbol}</span>
                   </span>
-                  <span className="num text-xs text-[var(--muted)]">
+                  <span className="num text-xs text-[var(--muted)] text-right">
                     {s.price != null
                       ? formatMoney(Number(s.price), quoteCurrencyForSymbol(s.symbol))
                       : "—"}
+                    <span className="block">
+                      {formatSignalAge(s.created_at)}
+                      {isStaleSignal(s.created_at) ? " · stale" : ""}
+                    </span>
                   </span>
                 </li>
               ))}
@@ -237,10 +316,11 @@ export default function Cockpit() {
           <Panel title="Session" delay={160}>
             <dl className="space-y-2 text-sm">
               {[
-                ["Win rate", `${winRate.toFixed(0)}%`, winRate >= 50 ? "var(--bullish)" : "var(--bearish)"],
+                ["Win rate", `${account.winRatePct.toFixed(0)}%`, account.winRatePct >= 50 ? "var(--bullish)" : "var(--bearish)"],
                 ["Open", String(open.length), "var(--foreground)"],
                 ["Closed", String(closed.length), "var(--foreground)"],
-                ["Pending", String(pendingSignals.length), "var(--hud)"],
+                ["Fresh", String(freshPending.length), "var(--hud)"],
+                ["Stale", String(stalePending.length), "var(--muted)"],
               ].map(([k, v, c]) => (
                 <div key={k as string} className="flex items-center justify-between">
                   <dt className="hud-label">{k}</dt>
@@ -258,52 +338,71 @@ export default function Cockpit() {
           <Panel delay={0} className="hud-corners">
             <div className="flex items-center justify-around gap-6 flex-wrap">
               <ReactorGauge
-                value={consensusShare}
-                label="Swarm consensus"
+                value={topSignal ? topSignal.conviction : null}
+                label="Model estimate"
                 sublabel={
                   topSignal
-                    ? `${Math.round(((consensusShare ?? 0) / 100) * 1000)} of 1000 agents · ${topSignal.symbol}`
-                    : "1000 agents watching"
+                    ? `${topSignal.symbol} · ${formatSignalAge(topSignal.created_at)}`
+                    : "No fresh signal"
                 }
               />
-              <div className="text-center">
-                <div className="hud-label">Total P&amp;L</div>
+              <div className="text-center max-w-sm">
+                <div className="hud-label">Account P&amp;L</div>
                 <div
                   className={`num text-6xl font-bold leading-tight ${
-                    totalPnl >= 0 ? "text-[var(--bullish)]" : "text-[var(--bearish)]"
+                    account.accountReturnPct >= 0 ? "text-[var(--bullish)]" : "text-[var(--bearish)]"
                   }`}
                 >
-                  {formatPct(totalPnl)}
+                  {formatPct(account.accountReturnPct)}
+                </div>
+                <div className="mt-1 text-xs text-[var(--muted)] leading-relaxed">
+                  Size-weighted and compounded, not a sum of trade percentages.
+                  Paper size is 1, so a higher price counts more. Currencies are not converted.
                 </div>
                 <div className="num mt-1 text-xs text-[var(--muted)]">
-                  {closed.length} closed · {open.length} open
+                  {closed.length} closed · {open.length} open · drawdown {formatPct(account.maxDrawdownPct)}
                 </div>
-                <div className="mt-3 flex justify-center gap-2">
-                  <BiasChip label="Macro" value={macroBias} />
-                  <BiasChip label="Social" value={socialBias} />
+                <div className="mt-3 flex justify-center gap-2 flex-wrap">
+                  <BiasChip
+                    label="Macro"
+                    value={bias.macro}
+                    available={bias.status === "ready" && bias.macroAvailable}
+                    detail={bias.macroDetail}
+                    pending={bias.status === "loading"}
+                  />
+                  <BiasChip
+                    label="Social sample"
+                    value={bias.social}
+                    available={bias.status === "ready" && bias.socialAvailable}
+                    detail={bias.socialDetail}
+                    pending={bias.status === "loading"}
+                  />
                 </div>
               </div>
             </div>
           </Panel>
 
-          <Panel title="Equity curve" delay={120}>
+          <Panel title="Account return" delay={120}>
             <EquityCurve trades={trades} height={190} />
           </Panel>
 
           <Panel
-            title="The swarm's ask"
+            title="Top fresh signal"
             delay={200}
             right={
               topSignal && (
                 <span className="num text-sm font-bold">
                   {topSignal.conviction}
-                  <span className="text-[var(--muted)]">/100</span>
+                  <span className="text-[var(--muted)]">/100 · {formatSignalAge(topSignal.created_at)}</span>
                 </span>
               )
             }
           >
             {topSignal ? (
               <div className="space-y-3">
+                <p className="text-xs text-[var(--muted)]">
+                  Monte Carlo score stored with the signal. Simulated model (1,000 runs), not a live vote.
+                </p>
                 <div className="flex items-baseline justify-between gap-3 flex-wrap">
                   <div className="flex items-baseline gap-3">
                     <span className="num text-2xl font-bold">{topSignal.symbol}</span>
@@ -336,13 +435,13 @@ export default function Cockpit() {
               </div>
             ) : (
               <p className="text-sm text-[var(--muted)]">
-                Nothing awaiting approval — the swarm raises its hand on the next ±2% move.
+                No fresh signal is waiting. A signal older than 7 days is listed below and is not a current recommendation.
               </p>
             )}
           </Panel>
 
           {pendingSignals.length > 1 && (
-            <Panel title={`Queue (${pendingSignals.length - 1})`} delay={280}>
+            <Panel title={`Fresh queue (${pendingSignals.length - 1})`} delay={280}>
               <div className="flex gap-3 overflow-x-auto pb-1">
                 {pendingSignals
                   .filter((s) => s.id !== topSignal?.id)
@@ -355,7 +454,7 @@ export default function Cockpit() {
                         <span className="num text-sm font-bold">{s.symbol}</span>
                         <span className="num text-sm">
                           {s.conviction}
-                          <span className="text-xs text-[var(--muted)]">/100</span>
+                          <span className="text-xs text-[var(--muted)]">/100 · {formatSignalAge(s.created_at)}</span>
                         </span>
                       </div>
                       <ConsensusStrip direction={s.direction} conviction={s.conviction} />
@@ -363,6 +462,38 @@ export default function Cockpit() {
                     </div>
                   ))}
               </div>
+            </Panel>
+          )}
+
+          {stalePending.length > 0 && (
+            <Panel title={`Stale (${stalePending.length}) — not in the headline`} delay={320}>
+              <p className="mb-3 text-xs text-[var(--muted)]">
+                Older than 7 days. Approving a directional one would use today&apos;s price, not the price from when it was written.
+              </p>
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {stalePending.slice(0, 6).map((s) => (
+                  <div
+                    key={s.id}
+                    className="min-w-[190px] rounded-lg border border-[var(--bearish)]/30 bg-[var(--panel-2)] p-3 space-y-2 opacity-80"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="num text-sm font-bold">{s.symbol}</span>
+                      <span className="text-[11px] uppercase tracking-wider text-[var(--bearish)]">
+                        stale · {formatSignalAge(s.created_at)}
+                      </span>
+                    </div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {s.direction} · score {s.conviction}/100
+                    </div>
+                    <SignalActions signal={s} />
+                  </div>
+                ))}
+              </div>
+              {stalePending.length > 6 && (
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  {stalePending.length - 6} more on the Signals page.
+                </p>
+              )}
             </Panel>
           )}
         </div>

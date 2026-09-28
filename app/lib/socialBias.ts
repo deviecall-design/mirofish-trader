@@ -5,6 +5,8 @@
  * +1 = maximum bullish sentiment
  */
 
+import { unavailableInput, type InputReading } from "./inputAvailability";
+
 interface StockTwitsMessage {
   created_at: string;
   body: string;
@@ -16,7 +18,7 @@ interface StockTwitsResponse {
 }
 
 const CACHE_TTL_MS = 300000; // 5 minutes
-const sentimentCache = new Map<string, { bias: number; timestamp: number }>();
+const sentimentCache = new Map<string, { reading: InputReading; timestamp: number }>();
 
 // Sentiment keywords for fallback if StockTwits doesn't provide explicit sentiment
 const BULLISH_KEYWORDS = [
@@ -49,7 +51,9 @@ function scoreText(text: string, keywords: string[]): number {
   return keywords.filter((kw) => lower.includes(kw)).length;
 }
 
-async function fetchStockTwitsSentiment(symbol: string): Promise<StockTwitsMessage[]> {
+async function fetchStockTwitsSentiment(
+  symbol: string
+): Promise<{ messages: StockTwitsMessage[] } | { error: string }> {
   try {
     const url = `https://api.stocktwits.com/api/2/streams/symbol/${symbol}.json?limit=30`;
     const res = await fetch(url, {
@@ -57,13 +61,13 @@ async function fetchStockTwitsSentiment(symbol: string): Promise<StockTwitsMessa
     });
     if (!res.ok) {
       console.warn(`StockTwits API error for ${symbol}: ${res.status}`);
-      return [];
+      return { error: `StockTwits HTTP ${res.status}` };
     }
     const data = (await res.json()) as StockTwitsResponse;
-    return data.messages || [];
+    return { messages: data.messages || [] };
   } catch (err) {
     console.error(`Failed to fetch StockTwits sentiment for ${symbol}:`, err);
-    return [];
+    return { error: "StockTwits request failed" };
   }
 }
 
@@ -115,24 +119,31 @@ function calculateBiasFromMessages(messages: StockTwitsMessage[]): number {
   return bias * volumeConfidence;
 }
 
-export async function getSocialBias(symbol: string): Promise<number> {
-  // Check cache
+export async function getSocialBiasReport(symbol: string): Promise<InputReading> {
   const cached = sentimentCache.get(symbol);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.bias;
+    return cached.reading;
   }
 
-  // Fetch messages from StockTwits
-  const messages = await fetchStockTwitsSentiment(symbol);
+  const fetched = await fetchStockTwitsSentiment(symbol);
+  let reading: InputReading;
+  if ("error" in fetched) {
+    reading = unavailableInput(fetched.error);
+  } else if (fetched.messages.length === 0) {
+    reading = unavailableInput("StockTwits returned no messages");
+  } else {
+    const bias = calculateBiasFromMessages(fetched.messages);
+    reading = {
+      value: Math.max(-1, Math.min(1, bias)),
+      available: true,
+      detail: null,
+    };
+  }
 
-  // Calculate bias from messages
-  const bias = calculateBiasFromMessages(messages);
+  sentimentCache.set(symbol, { reading, timestamp: Date.now() });
+  return reading;
+}
 
-  // Clamp to [-1, 1]
-  const clampedBias = Math.max(-1, Math.min(1, bias));
-
-  // Cache the result
-  sentimentCache.set(symbol, { bias: clampedBias, timestamp: Date.now() });
-
-  return clampedBias;
+export async function getSocialBias(symbol: string): Promise<number> {
+  return (await getSocialBiasReport(symbol)).value;
 }

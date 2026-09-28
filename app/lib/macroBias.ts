@@ -5,6 +5,8 @@
  * +1 = maximum risk-on (easing, complacency, strong growth)
  */
 
+import { unavailableInput, type InputReading } from "./inputAvailability";
+
 interface FREDSeries {
   T10Y2Y?: number; // 10yr - 2yr yield spread
   NFCI?: number; // Chicago Fed National Financial Conditions Index
@@ -14,7 +16,9 @@ interface FREDSeries {
 }
 
 const CACHE_TTL_MS = 3600000; // 1 hour
-let macroCache: { bias: number; timestamp: number } | null = null;
+let macroCache: { reading: InputReading; timestamp: number } | null = null;
+
+const SERIES_IDS = ["T10Y2Y", "NFCI", "VIXCLS", "DEXUSEU", "T10YIE"] as const;
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -22,10 +26,7 @@ function sigmoid(x: number): number {
 
 async function fetchFREDSeries(seriesId: string): Promise<number | null> {
   const apiKey = process.env.FRED_API_KEY;
-  if (!apiKey) {
-    console.warn("FRED_API_KEY not configured — falling back to 0");
-    return null;
-  }
+  if (!apiKey) return null;
 
   try {
     const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json&limit=1`;
@@ -47,28 +48,35 @@ async function fetchFREDSeries(seriesId: string): Promise<number | null> {
   }
 }
 
-export async function getMacroBias(): Promise<number> {
-  // Check cache
+export async function getMacroBiasReport(): Promise<InputReading> {
   if (macroCache && Date.now() - macroCache.timestamp < CACHE_TTL_MS) {
-    return macroCache.bias;
+    return macroCache.reading;
   }
 
+  if (!process.env.FRED_API_KEY) {
+    const reading = unavailableInput("FRED_API_KEY is not set");
+    macroCache = { reading, timestamp: Date.now() };
+    return reading;
+  }
+
+  const fetched = await Promise.all(SERIES_IDS.map((id) => fetchFREDSeries(id)));
   const series: FREDSeries = {};
+  const missing: string[] = [];
+  SERIES_IDS.forEach((id, i) => {
+    const value = fetched[i];
+    if (value == null) {
+      missing.push(id);
+      return;
+    }
+    if (id === "VIXCLS") series.VIX = value;
+    else series[id] = value;
+  });
 
-  // Fetch all indicators in parallel
-  const [t10y2y, nfci, vix, dexuseu, t10yie] = await Promise.all([
-    fetchFREDSeries("T10Y2Y"), // 10yr - 2yr spread
-    fetchFREDSeries("NFCI"), // Financial Conditions Index
-    fetchFREDSeries("VIXCLS"), // VIX (close)
-    fetchFREDSeries("DEXUSEU"), // EUR/USD (DXY proxy)
-    fetchFREDSeries("T10YIE"), // 10yr breakeven inflation
-  ]);
-
-  series.T10Y2Y = t10y2y ?? undefined;
-  series.NFCI = nfci ?? undefined;
-  series.VIX = vix ?? undefined;
-  series.DEXUSEU = dexuseu ?? undefined;
-  series.T10YIE = t10yie ?? undefined;
+  if (missing.length === SERIES_IDS.length) {
+    const reading = unavailableInput("FRED returned no usable data");
+    macroCache = { reading, timestamp: Date.now() };
+    return reading;
+  }
 
   // Calculate bias from components
   let bias = 0;
@@ -123,8 +131,15 @@ export async function getMacroBias(): Promise<number> {
   // Clamp to [-1, 1]
   bias = Math.max(-1, Math.min(1, bias));
 
-  // Cache the result
-  macroCache = { bias, timestamp: Date.now() };
+  const reading: InputReading = {
+    value: bias,
+    available: true,
+    detail: missing.length ? `Missing ${missing.join(", ")}` : null,
+  };
+  macroCache = { reading, timestamp: Date.now() };
+  return reading;
+}
 
-  return bias;
+export async function getMacroBias(): Promise<number> {
+  return (await getMacroBiasReport()).value;
 }

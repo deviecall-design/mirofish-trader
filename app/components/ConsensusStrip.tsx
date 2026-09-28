@@ -65,8 +65,8 @@ export default function ConsensusStrip({
           />
         ))}
       </div>
-      <div className="num mt-1 text-[11px] text-[var(--muted)]">
-        L {long} · S {short} · A {abstain}
+      <div className="mt-1 text-[11px] text-[var(--muted)]">
+        Illustrative split from the stored score, not a live vote.
       </div>
     </div>
   );

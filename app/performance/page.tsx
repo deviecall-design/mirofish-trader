@@ -1,6 +1,7 @@
 import { Card, Stat } from "../components/Card";
 import { PnLLineChart } from "../components/charts/PnLLineChart";
 import { supabase, TradeRow } from "../lib/supabase";
+import { performanceFromTrades } from "../lib/pnl";
 import { DrawdownChart } from "./DrawdownChart";
 
 export const dynamic = "force-dynamic";
@@ -15,27 +16,15 @@ export default async function PerformancePage() {
     .limit(500);
 
   const closed: TradeRow[] = data ?? [];
+  const perf = performanceFromTrades(closed);
+  const equityCurve = perf.equityCurve.map((p) => ({
+    t: p.t,
+    cum: Number(p.returnPct.toFixed(2)),
+    drawdown: Number(p.drawdownPct.toFixed(2)),
+  }));
 
-  let cum = 0;
-  let peak = 0;
-  let maxDrawdown = 0;
-  const equityCurve = closed.map((t) => {
-    cum += Number(t.pnl ?? 0);
-    peak = Math.max(peak, cum);
-    const drawdown = cum - peak;
-    if (drawdown < maxDrawdown) maxDrawdown = drawdown;
-    return {
-      t: t.closed_at ?? t.opened_at,
-      cum: Number(cum.toFixed(2)),
-      drawdown: Number(drawdown.toFixed(2)),
-    };
-  });
-
-  const wins = closed.filter((t) => Number(t.pnl ?? 0) > 0);
-  const losses = closed.filter((t) => Number(t.pnl ?? 0) < 0);
-  const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
-  const avgReturn =
-    closed.length ? closed.reduce((s, t) => s + Number(t.pnl ?? 0), 0) / closed.length : 0;
+  const winRate = perf.winRatePct;
+  const avgReturn = perf.equalWeightAverageReturnPct;
   const bestTrade = closed.reduce(
     (best, t) => Math.max(best, Number(t.pnl ?? -Infinity)),
     -Infinity
@@ -52,7 +41,9 @@ export default async function PerformancePage() {
       <header>
         <h1 className="text-2xl font-semibold">Performance</h1>
         <p className="text-sm text-[var(--muted)] mt-1">
-          Closed-trade analytics. Equity curve and drawdown are based on cumulative percentage P&amp;L.
+          Account P&amp;L weights each closed trade by price × quantity and reinvests the cash.
+          It is not the sum of the percentages. Paper trades are stored as quantity 1, and prices
+          are not converted between currencies, so a higher-priced symbol counts more.
         </p>
       </header>
 
@@ -60,18 +51,26 @@ export default async function PerformancePage() {
         <Stat
           label="Win rate"
           value={`${winRate.toFixed(0)}%`}
-          hint={`${wins.length} W / ${losses.length} L`}
+          hint={`${perf.wins} W / ${perf.losses} L`}
           tone={winRate >= 50 ? "bullish" : closed.length ? "bearish" : undefined}
         />
         <Stat
-          label="Avg return"
+          label="Account return"
+          value={fmtPct(perf.accountReturnPct)}
+          hint="size-weighted"
+          tone={perf.accountReturnPct >= 0 ? "bullish" : "bearish"}
+        />
+        <Stat
+          label="Avg trade"
           value={fmtPct(avgReturn)}
+          hint="each trade, unweighted"
           tone={avgReturn >= 0 ? "bullish" : "bearish"}
         />
         <Stat
           label="Max drawdown"
-          value={fmtPct(maxDrawdown)}
-          tone={maxDrawdown < 0 ? "bearish" : undefined}
+          value={fmtPct(perf.maxDrawdownPct)}
+          hint="from peak equity"
+          tone={perf.maxDrawdownPct < 0 ? "bearish" : undefined}
         />
         <Stat
           label="Best / worst"
@@ -83,13 +82,13 @@ export default async function PerformancePage() {
         />
       </div>
 
-      <Card title="Cumulative P&amp;L over time">
+      <Card title="Account return over time">
         <PnLLineChart
           data={equityCurve.map((p) => ({ date: p.t, pnl: p.cum }))}
         />
       </Card>
 
-      <Card title="Equity & drawdown">
+      <Card title="Account equity and drawdown">
         {equityCurve.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">
             No closed trades yet — chart appears after the first trade closes.
