@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { formatMoney, quoteCurrencyForSymbol } from "../lib/currency";
 import { supabase } from "../lib/supabase";
 import { sendTelegram } from "../lib/telegram";
 import { executeEntry, RiskRejectionError } from "../lib/execution";
@@ -118,7 +119,7 @@ export async function approveSignal(signalId: string) {
 
   const modeTag = execution.mode === "paper" ? "" : ` [${execution.mode}]`;
   await sendTelegram(
-    `✅ Approved <b>${signal.symbol}</b> ${signal.direction} @ $${execution.entryPrice.toFixed(2)}${modeTag}`
+    `✅ Approved <b>${signal.symbol}</b> ${signal.direction} @ ${formatMoney(execution.entryPrice, quoteCurrencyForSymbol(signal.symbol))}${modeTag}`
   );
 
   revalidatePath("/signals");

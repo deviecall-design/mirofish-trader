@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatMoney, quoteCurrencyForSymbol } from "@/app/lib/currency";
 
 // JarvisChat — the conversation surface (messages, confirm cards, voice
 // input). Embedded as the cockpit console on the dashboard and inside the
@@ -184,7 +185,10 @@ export default function JarvisChat({ heightClass = "max-h-[55vh] min-h-[160px]" 
                 <div className="font-semibold">
                   Confirm order — {entry.confirm.symbol} {entry.confirm.direction}
                   {entry.confirm.currentPrice != null &&
-                    ` @ $${Number(entry.confirm.currentPrice).toFixed(2)}`}
+                    ` @ ${formatMoney(
+                      Number(entry.confirm.currentPrice),
+                      quoteCurrencyForSymbol(entry.confirm.symbol)
+                    )}`}
                 </div>
                 <div className="hud-label" style={{ color: "var(--armed)" }}>
                   {entry.confirm.executionMode === "live"

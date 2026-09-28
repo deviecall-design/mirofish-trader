@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import { formatMoney, quoteCurrencyForSymbol } from "@/app/lib/currency";
 import { SignalRow } from "@/app/lib/supabase";
 import ConsensusStrip from "./ConsensusStrip";
 
@@ -122,7 +123,9 @@ export const SignalCard: React.FC<SignalCardProps> = React.memo(
         )}
 
         {signal.price !== null && signal.price !== undefined && (
-          <p className="num text-xs text-[var(--muted)]">${Number(signal.price).toFixed(2)}</p>
+          <p className="num text-xs text-[var(--muted)]">
+            {formatMoney(Number(signal.price), quoteCurrencyForSymbol(signal.symbol))}
+          </p>
         )}
 
         <div className="pt-2 border-t border-[var(--border)] flex items-center gap-2">
